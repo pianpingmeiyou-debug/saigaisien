@@ -4,25 +4,17 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'よりそい｜災害支援マッチング',
-  description: '被災者と支援者をつなぐ、災害時の支援マッチングアプリ。',
+  title: '明日の環（アスノワ）｜災害時共助アプリ',
+  description: '被災者と支援者をつなぐ、災害時の共助・物資マッチングアプリ。',
   generator: 'v0.app',
   icons: {
     icon: [
       {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
+        url: '/asunowa.png',
+        type: 'image/png',
       },
     ],
-    apple: '/apple-icon.png',
+    apple: '/asunowa.png',
   },
 }
 
