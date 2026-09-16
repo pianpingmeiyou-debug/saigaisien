@@ -1,58 +1,80 @@
 'use client'
 
-import { FormEvent, useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getUserProfile, saveUserProfile } from '@/lib/store'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import { UserRole } from '@/lib/types'
-import { ArrowLeft, Check } from 'lucide-react'
+import { Check, ArrowRight } from 'lucide-react'
 
-export default function DeclarationPage() {
+export default function AuthSetupPage() {
   const router = useRouter()
-  const [role, setRole] = useState<UserRole>('victim')
-  const [selectedPref, setSelectedPref] = useState('鳥取県')
-  const [selectedCity, setSelectedCity] = useState('米子市')
-  const [message, setMessage] = useState('')
+  const [user, setUser] = useState(getUserProfile())
+  const [name, setName] = useState(user.name || '')
+  const [role, setRole] = useState<UserRole>(user.user_role || 'victim')
+  const [selectedPref, setSelectedPref] = useState(user.disaster_prefecture || '鳥取県')
+  const [selectedCity, setSelectedCity] = useState(user.disaster_city || '米子市')
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    const profile = getUserProfile()
-    setRole(profile.user_role || 'victim')
-    setSelectedPref(profile.disaster_prefecture)
-    setSelectedCity(profile.disaster_city)
+    const current = getUserProfile()
+    setUser(current)
+    setName(current.name || '')
+    setRole(current.user_role || 'victim')
   }, [])
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) {
+      setError('公開表示名を入力してください')
+      return
+    }
+
     saveUserProfile({
+      name: name.trim(),
       user_role: role,
       disaster_prefecture: selectedPref,
       disaster_city: selectedCity,
+      is_demo: false,
     })
 
-    setMessage('登録地域と役割を保存しました。')
-    setTimeout(() => {
-      router.push('/')
-    }, 1000)
+    router.push('/')
   }
 
   const availableCities = getCitiesByPrefecture(selectedPref)
 
   return (
-    <main className="auth-page">
-      <section className="auth-card declaration-card">
-        <Link href="/" className="text-button" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '16px' }}>
-          <ArrowLeft size={16} /> ホームへ戻る
-        </Link>
-        <p className="eyebrow">明日の環</p>
-        <h1>現在の状況・地域設定</h1>
-        <p className="auth-lead">
-          登録地域と現在の役割（被災者・支援者・共助）を設定してください。
+    <main className="auth-page" style={{ background: '#f8fafc', minHeight: '100vh', display: 'grid', placeItems: 'center', padding: '20px' }}>
+      <section className="auth-card" style={{ maxWidth: '480px', width: '100%', background: '#ffffff', borderRadius: '20px', padding: '36px 28px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.06)' }}>
+        <p className="eyebrow" style={{ color: '#0284c7', fontWeight: 700, fontSize: '12px' }}>初回アカウント設定</p>
+        <h1 style={{ fontSize: '24px', margin: '4px 0 12px', color: '#0f172a' }}>プロフィールと地域を登録</h1>
+        <p className="auth-lead" style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.6, marginBottom: '20px' }}>
+          明日の環で利用する「公開表示名」「役割」「登録地域」を設定してください。（※後からいつでも変更できます）
         </p>
 
-        <form className="auth-form" onSubmit={submit}>
-          <fieldset>
-            <legend style={{ fontSize: '13px', fontWeight: 700, marginBottom: '8px' }}>あなたの立場（役割）</legend>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+              表示名（ニックネーム）
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="例：あすのわ太郎"
+              required
+              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+            />
+            <small style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>
+              ※投稿やチャットに表示されます。Google/LINEの氏名は直接公開されません。
+            </small>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
+              あなたの立場・役割
+            </label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
               <button
                 type="button"
@@ -103,11 +125,11 @@ export default function DeclarationPage() {
                 共助 (双方)
               </button>
             </div>
-          </fieldset>
+          </div>
 
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
-              登録地域（都道府県・市区町村）
+              お住まい・登録地域
             </label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <select
@@ -141,14 +163,15 @@ export default function DeclarationPage() {
             </div>
           </div>
 
-          <button className="primary-button full" type="submit" style={{ marginTop: '12px' }}>
-            設定を保存する
+          {error && <p style={{ color: '#e11d48', fontSize: '12px', margin: 0 }}>{error}</p>}
+
+          <button
+            type="submit"
+            className="primary-button full"
+            style={{ padding: '12px', justifyContent: 'center', fontWeight: 700, marginTop: '8px' }}
+          >
+            登録して利用を開始する <ArrowRight size={16} />
           </button>
-          {message && (
-            <p className="form-note" role="status" style={{ textAlign: 'center' }}>
-              <Check size={16} /> {message}
-            </p>
-          )}
         </form>
       </section>
     </main>

@@ -4,14 +4,15 @@ import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
-  ArrowLeft, MessageCircle, HeartHandshake, Send, Check, ShieldCheck,
-  AlertTriangle, LockKeyhole, Clock3, ChevronRight, UserRound, Package, MapPin
+  ArrowLeft, MessageCircle, Send, Check, ShieldCheck,
+  AlertTriangle, LockKeyhole, Clock3, ChevronRight, UserRound, Package, MapPin, Flag
 } from 'lucide-react'
 import {
   getUserProfile, getChatSessions, getChatSessionById, startSupport,
   confirmSupportCompletion, sendChatMessage, getLocationDisasterLevel, getPosts
 } from '@/lib/store'
 import { ChatSession, UserRole } from '@/lib/types'
+import ReportModal from '@/components/report-modal'
 
 function ChatPageContent() {
   const router = useRouter()
@@ -24,6 +25,7 @@ function ChatPageContent() {
   const [inputMessage, setInputMessage] = useState('')
   const [notice, setNotice] = useState('')
   const [errorModalMsg, setErrorModalMsg] = useState<string | null>(null)
+  const [reportTargetUser, setReportTargetUser] = useState<{ id: string; name: string } | null>(null)
 
   useEffect(() => {
     const currentSessions = getChatSessions()
@@ -71,10 +73,15 @@ function ChatPageContent() {
     e.preventDefault()
     if (!activeSession || !inputMessage.trim()) return
 
+    if (user.account_status === 'frozen') {
+      setErrorModalMsg('ご利用のアカウントは凍結されているため、チャット機能はご利用いただけません。')
+      return
+    }
+
     const res = sendChatMessage(
       activeSession.id,
       user.id,
-      activeSession.victim_id === user.id ? '被災者' : '支援者',
+      user.name || 'ユーザー',
       inputMessage
     )
 
@@ -82,7 +89,7 @@ function ChatPageContent() {
       setInputMessage('')
       refreshSession(activeSession.id)
     } else if (res.error) {
-      setNotice(res.error)
+      setErrorModalMsg(res.error)
     }
   }
 
@@ -92,6 +99,18 @@ function ChatPageContent() {
 
   const isUserSupporter = activeSession ? activeSession.supporter_id === user.id : false
   const isUserVictim = activeSession ? activeSession.victim_id === user.id : false
+
+  // チャットの相手ユーザー情報
+  const partnerId = activeSession
+    ? activeSession.victim_id === user.id
+      ? activeSession.supporter_id
+      : activeSession.victim_id
+    : ''
+  const partnerName = activeSession
+    ? activeSession.victim_id === user.id
+      ? activeSession.supporter_name || '支援者'
+      : activeSession.victim_name || '被災者'
+    : ''
 
   return (
     <main className="standalone-page" style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '40px' }}>
@@ -110,6 +129,12 @@ function ChatPageContent() {
         </div>
       </header>
 
+      {user.account_status === 'frozen' && (
+        <div style={{ background: '#fee2e2', border: '1px solid #f87171', color: '#991b1b', padding: '12px 20px', fontSize: '13px', textAlign: 'center' }}>
+          <b>アカウント凍結中：</b> メッセージの閲覧は可能ですが、新規メッセージの送信はできません。
+        </div>
+      )}
+
       <section className="standalone-content" style={{ maxWidth: '1000px', margin: '0 auto', padding: '16px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', minHeight: '600px' }}>
           
@@ -124,7 +149,7 @@ function ChatPageContent() {
               <div style={{ textAlign: 'center', padding: '40px 10px', color: '#94a3b8' }}>
                 <Package size={32} style={{ marginBottom: '8px' }} />
                 <p style={{ fontSize: '14px', margin: 0 }}>チャット履歴はまだありません</p>
-                <small>マッチングが成立するとここに表示されます</small>
+                <small>支援・依頼のマッチングが成立するとここに表示されます</small>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -145,6 +170,7 @@ function ChatPageContent() {
                         background: isActive ? '#f0f9ff' : '#ffffff',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
+                        width: '100%',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -175,31 +201,44 @@ function ChatPageContent() {
           <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {activeSession ? (
               <>
-                {/* ヘッダー情報・ステータスバー */}
+                {/* ヘッダー情報 */}
                 <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <div>
-                      <h2 style={{ fontSize: '18px', margin: 0, fontWeight: 700, color: '#0f172a' }}>
+                      <h2 style={{ fontSize: '17px', margin: 0, fontWeight: 700, color: '#0f172a' }}>
                         {activeSession.post_title}
                       </h2>
-                      {activePost && (
-                        <span style={{ fontSize: '13px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                          <MapPin size={14} /> 受け取り場所: {activePost.received_location}
-                          {postDisasterLevel >= 3 && (
-                            <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: '6px' }}>(災害レベル3 危険地域)</span>
-                          )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '12px', color: '#475569' }}>
+                          お相手：<b>{partnerName}</b>
                         </span>
-                      )}
+                        {activePost && (
+                          <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <MapPin size={13} /> 受け取り場所: {activePost.received_location}
+                            {postDisasterLevel >= 3 && (
+                              <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: '4px' }}>(災害Lv.3停止中)</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="text-button"
+                        style={{ color: '#e11d48', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                        onClick={() => setReportTargetUser({ id: partnerId, name: partnerName })}
+                      >
+                        <Flag size={14} /> 相手を通報
+                      </button>
                       <span
                         style={{
                           display: 'inline-block',
                           padding: '4px 10px',
                           borderRadius: '20px',
                           fontWeight: 700,
-                          fontSize: '13px',
+                          fontSize: '12px',
                           background: activeSession.status === 'completed' ? '#94a3b8' : activeSession.status === 'supporting' ? '#22c55e' : '#f59e0b',
                           color: '#ffffff',
                         }}
@@ -209,12 +248,12 @@ function ChatPageContent() {
                     </div>
                   </div>
 
-                  {/* ステータス別の操作エリア */}
+                  {/* 取引ステータス別アクションエリア */}
                   <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px', marginTop: '10px' }}>
                     {activeSession.status === 'before_support' && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#475569' }}>
-                          状態：マッチング成立（支援者の移動開始待ち）
+                          状態：マッチング成立（支援者の移動・配達開始待ち）
                         </span>
                         {isUserSupporter ? (
                           <button
@@ -247,22 +286,21 @@ function ChatPageContent() {
                     )}
 
                     {activeSession.status === 'supporting' && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
                           <span style={{ fontSize: '14px', fontWeight: 600, color: '#166534' }}>
                             【支援中】
                           </span>
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>
-                            物資の受け渡しが完了したら双方で完了確認を行ってください
-                          </span>
+                          <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0' }}>
+                            物資の受け渡しが完了したら、双方が「支援完了確認」を押すことで取引が完了します。
+                          </p>
                         </div>
 
-                        {/* 完了確認ボタン (両者に表示) */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {isUserVictim && activeSession.victim_completed_at ? (
-                            <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600 }}>✓ あなたは完了確認済み</span>
-                          ) : isUserSupporter && activeSession.supporter_completed_at ? (
-                            <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600 }}>✓ あなたは完了確認済み</span>
+                          {(isUserVictim && activeSession.victim_completed_at) || (isUserSupporter && activeSession.supporter_completed_at) ? (
+                            <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600, background: '#dcfce7', padding: '6px 10px', borderRadius: '6px' }}>
+                              ✓ あなたは完了確認済み（相手の確認待ち）
+                            </span>
                           ) : (
                             <button
                               type="button"
@@ -296,7 +334,7 @@ function ChatPageContent() {
                   </div>
                 </div>
 
-                {/* メッセージ一覧 */}
+                {/* メッセージ一覧 (仕様書: message.sender_id === current_user.id なら自分側、それ以外なら相手側) */}
                 <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc' }}>
                   {activeSession.messages.map(m => {
                     const isMe = m.sender_id === user.id
@@ -324,12 +362,12 @@ function ChatPageContent() {
                         }}
                       >
                         <span style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
-                          {m.sender_name}
+                          {isMe ? `${user.name} (自分)` : m.sender_name}
                         </span>
                         <div
                           style={{
                             padding: '10px 14px',
-                            borderRadius: '12px',
+                            borderRadius: isMe ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
                             background: isMe ? '#0284c7' : '#ffffff',
                             color: isMe ? '#ffffff' : '#0f172a',
                             boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
@@ -340,19 +378,23 @@ function ChatPageContent() {
                         >
                           {m.body}
                         </div>
+                        <small style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
+                          {new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                        </small>
                       </div>
                     )
                   })}
                 </div>
 
-                {/* 入力フォーム */}
+                {/* メッセージ入力フォーム */}
                 {activeSession.status !== 'completed' ? (
                   <form onSubmit={handleSendMessage} style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '10px' }}>
                     <input
                       type="text"
                       value={inputMessage}
                       onChange={e => setInputMessage(e.target.value)}
-                      placeholder="メッセージを入力してください..."
+                      placeholder={user.account_status === 'frozen' ? '凍結中のため送信できません' : 'メッセージを入力してください...'}
+                      disabled={user.account_status === 'frozen'}
                       style={{
                         flex: 1,
                         padding: '10px 14px',
@@ -363,14 +405,15 @@ function ChatPageContent() {
                     />
                     <button
                       type="submit"
+                      disabled={user.account_status === 'frozen'}
                       style={{
-                        background: '#0284c7',
+                        background: user.account_status === 'frozen' ? '#94a3b8' : '#0284c7',
                         color: '#ffffff',
                         border: 'none',
                         padding: '0 20px',
                         borderRadius: '8px',
                         fontWeight: 600,
-                        cursor: 'pointer',
+                        cursor: user.account_status === 'frozen' ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
@@ -412,6 +455,21 @@ function ChatPageContent() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* 通報モーダル */}
+      {reportTargetUser && (
+        <ReportModal
+          isOpen={true}
+          onClose={() => setReportTargetUser(null)}
+          targetType="chat_user"
+          targetId={reportTargetUser.id}
+          targetTitle={`チャット相手: ${reportTargetUser.name}`}
+          targetAuthorName={reportTargetUser.name}
+          onReportSuccess={() => {
+            setNotice('ユーザーの通報を受け付けました')
+          }}
+        />
       )}
 
       {notice && (
