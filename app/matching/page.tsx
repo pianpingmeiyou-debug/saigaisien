@@ -39,7 +39,7 @@ export default function MatchingPage() {
         <button type="button" className="icon-button" aria-label="前の画面へ戻る" onClick={goBack}>
           <ArrowLeft size={20} />
         </button>
-        <Link href="/" className="brand" aria-label="最上位のホームへ移動">
+        <Link href="/" className="brand" aria-label="トップへ移動">
           <div className="brand-mark" style={{ background: 'transparent', padding: 0 }}>
             <img src="/asunowa.png" alt="明日の環" style={{ width: '24px', height: '24px', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
@@ -75,7 +75,7 @@ export default function MatchingPage() {
             <LockKeyhole size={30} />
             <h2>この機能はレベル2以下でのみ使用できます</h2>
             <p>災害レベルがLv.3のため安全確保のためマッチング機能は停止しています。</p>
-            <Link href="/" className="primary-button">ホームへ戻る</Link>
+            <Link href="/" className="primary-button">トップへ戻る</Link>
           </div>
         ) : (
           <>

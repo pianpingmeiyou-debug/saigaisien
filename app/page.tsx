@@ -8,20 +8,23 @@ import {
   AlertTriangle, Check, ChevronRight, Clock3,
   FileText, Flag, HeartHandshake, MapPin, Menu,
   MessageCircle, Package, Search, Send, ShieldCheck,
-  SlidersHorizontal, UserRound, X, Plus, LogIn, LockKeyhole
+  SlidersHorizontal, UserRound, X, Plus, LogIn, LockKeyhole,
+  ChevronDown, Home as HomeIcon, Map as MapIcon, MessageSquare,
+  Sparkles, Power
 } from 'lucide-react'
 
 import {
   getUserProfile, saveUserProfile, getCityDisasterLevel, getLocationDisasterLevel,
-  getSortedFilteredPosts, addPost, applyAndCreateMatch
+  getSortedFilteredPosts, addPost, applyAndCreateMatch, getDisasterLevels,
+  getSystemStatus, isWithin12Hours
 } from '@/lib/store'
-import { UserRole, PostCategory, UrgencyLevel, PostItem } from '@/lib/types'
+import { UserRole, PostCategory, UrgencyLevel, PostItem, DisasterLevelItem } from '@/lib/types'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import ReportModal from '@/components/report-modal'
 
 const DisasterMap = dynamic(() => import('@/components/disaster-map'), { ssr: false })
 
-type Tab = 'ホーム' | '地図' | '検索' | '投稿' | 'チャット' | 'マイページ'
+type Tab = '検索' | '投稿' | '地図' | 'チャット' | 'マイページ'
 
 function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'red' | 'amber' | 'green' | 'blue' | 'neutral' }) {
   return <span className={`badge badge-${tone}`}>{children}</span>
@@ -34,7 +37,12 @@ export default function Page() {
   // ユーザープロファイル
   const [user, setUser] = useState(getUserProfile())
 
-  // 災害レベル (ユーザー登録地域)
+  // システム全面停止状態
+  const [isSystemStopped, setIsSystemStopped] = useState(false)
+
+  // 災害レベル
+  const disasterLevels = useMemo(() => getDisasterLevels(), [])
+
   const currentDisasterLevel = useMemo(() => {
     return getCityDisasterLevel(user.disaster_prefecture, user.disaster_city)
   }, [user.disaster_prefecture, user.disaster_city])
@@ -47,13 +55,11 @@ export default function Page() {
   const [reportTargetPost, setReportTargetPost] = useState<PostItem | null>(null)
 
   const [notice, setNotice] = useState('')
-  const [draftSaved, setDraftSaved] = useState(false)
   const [modalLockMsg, setModalLockMsg] = useState<string | null>(null)
 
-  // 投稿フォーム状態
+  // 5-1. 投稿フォーム状態 (物資カテゴリの複数選択対応)
   const [form, setForm] = useState<{
-    title: string
-    category: PostCategory
+    categories: PostCategory[]
     quantity: string
     placePref: string
     placeCity: string
@@ -63,8 +69,7 @@ export default function Page() {
     postType: 'request' | 'offer'
     tags: string
   }>({
-    title: '',
-    category: '飲料',
+    categories: ['食料'],
     quantity: '',
     placePref: user.disaster_prefecture || '鳥取県',
     placeCity: user.disaster_city || '米子市',
@@ -78,21 +83,18 @@ export default function Page() {
   useEffect(() => {
     const freshUser = getUserProfile()
     setUser(freshUser)
+    setIsSystemStopped(getSystemStatus().is_stopped)
     setForm(prev => ({
       ...prev,
-      placePref: freshUser.disaster_prefecture,
-      placeCity: freshUser.disaster_city,
+      placePref: freshUser.disaster_prefecture || '鳥取県',
+      placeCity: freshUser.disaster_city || '米子市',
       postType: freshUser.user_role === 'victim' ? 'request' : 'offer',
     }))
-  }, [])
-
-  const refreshUser = () => {
-    setUser(getUserProfile())
-  }
+  }, [tab])
 
   const showNotice = (text: string) => {
     setNotice(text)
-    setTimeout(() => setNotice(''), 2800)
+    setTimeout(() => setNotice(''), 3000)
   }
 
   const selectTab = (nextTab: Tab) => {
@@ -107,38 +109,49 @@ export default function Page() {
     setTab(nextTab)
   }
 
-  // ソート・フィルタリング投稿一覧
+  // ソート・フィルタリング投稿一覧 (活動地域最優先 & 複数カテゴリ対応)
   const postsList = useMemo(() => {
     const sorted = getSortedFilteredPosts(user.disaster_prefecture, user.disaster_city, user.user_role)
 
     const terms = query.split(/[、,\s]+/).map(t => t.trim()).filter(Boolean)
     return sorted.filter(p => {
-      const searchable = `${p.title} ${p.category} ${p.received_location} ${p.user_name} ${(p.tags ?? []).join(' ')}`.toLowerCase()
+      const catString = p.categories ? p.categories.join(' ') : p.category
+      const searchable = `${p.description} ${catString} ${p.received_location} ${p.user_name} ${(p.tags ?? []).join(' ')}`.toLowerCase()
       const matchesQuery = terms.length === 0 || terms.some(t => searchable.includes(t.toLowerCase()))
       const matchesUrgency = urgencyFilter === 'すべて' || p.urgency === urgencyFilter
-      const matchesCategory = categoryFilter === 'すべて' || p.category === categoryFilter
+
+      const matchesCategory = categoryFilter === 'すべて' || (
+        p.categories
+          ? p.categories.includes(categoryFilter as PostCategory)
+          : p.category === categoryFilter
+      )
       const matchesType = typeFilter === 'すべて' || p.type === typeFilter
       return matchesQuery && matchesUrgency && matchesCategory && matchesType
     })
   }, [user.disaster_prefecture, user.disaster_city, user.user_role, query, urgencyFilter, categoryFilter, typeFilter])
 
-  // 投稿送信ハンドラ
+  // 5-1. 投稿送信ハンドラ (複数選択カテゴリ対応)
   const submitPost = () => {
     if (user.account_status === 'frozen') {
       setModalLockMsg('ご利用のアカウントは凍結されているため、投稿機能はご利用いただけません。')
       return
     }
 
-    if (!form.title.trim()) {
-      showNotice('タイトルを入力してください')
+    if (form.categories.length === 0) {
+      showNotice('物資カテゴリを1つ以上選択してください')
+      return
+    }
+
+    if (!form.description.trim()) {
+      showNotice('投稿内容・説明を入力してください')
       return
     }
 
     const fullPlace = `${form.placePref}${form.placeCity} ${form.placeDetail}`.trim()
 
     const res = addPost({
-      title: form.title.trim(),
-      category: form.category,
+      categories: form.categories,
+      category: form.categories[0],
       type: user.user_role === 'both' ? form.postType : undefined,
       description: form.description + (form.quantity ? ` (数量: ${form.quantity})` : ''),
       received_location: fullPlace,
@@ -153,11 +166,10 @@ export default function Page() {
 
     showNotice(form.postType === 'request' ? '支援依頼を公開しました' : '支援提供を公開しました')
     setForm({
-      title: '',
-      category: '飲料',
+      categories: ['食料'],
       quantity: '',
-      placePref: user.disaster_prefecture,
-      placeCity: user.disaster_city,
+      placePref: user.disaster_prefecture || '鳥取県',
+      placeCity: user.disaster_city || '米子市',
       placeDetail: '',
       urgency: '中',
       description: '',
@@ -195,19 +207,68 @@ export default function Page() {
     }
   }
 
-  const roleLabel =
-    user.user_role === 'victim'
-      ? '被災者 (依頼)'
-      : user.user_role === 'supporter'
-      ? '支援者 (提供)'
-      : '共助 (依頼・提供)'
-
   const availableCitiesForPost = getCitiesByPrefecture(form.placePref)
 
   return (
-    <main className="app-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#f8fafc' }}>
-      
-      {/* 1. ヘッダー Header (仕様書 7.2項: 登録地域と災害レベルをヘッダーへ移動・表示) */}
+    <main className="app-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', paddingBottom: '80px', background: '#f8fafc' }}>
+
+      {/* 通知トースト */}
+      {notice && (
+        <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#ffffff', padding: '10px 20px', borderRadius: '20px', fontSize: '13px', zIndex: 9999 }}>
+          {notice}
+        </div>
+      )}
+
+      {/* システム全面停止時のオーバーレイ案内画面 */}
+      {isSystemStopped && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.92)',
+            zIndex: 10000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            color: '#ffffff',
+          }}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              color: '#0f172a',
+              maxWidth: '540px',
+              width: '100%',
+              borderRadius: '20px',
+              padding: '32px 24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#fee2e2', color: '#ef4444', display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
+              <Power size={32} />
+            </div>
+
+            <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '0 0 16px', color: '#991b1b' }}>
+              現在、サービスの提供を一時停止しております
+            </h2>
+
+            <p style={{ fontSize: '14px', lineHeight: 1.7, color: '#334155', textAlign: 'left', background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
+              いつもご利用いただきありがとうございます。現在、誤情報（デマ）の拡散防止およびシステム確認のため、すべての機能を一時的に停止しております。ご利用の皆様にはご不便・ご迷惑をおかけいたしますが、ご理解とご協力のほどよろしくお願い申し上げます。
+            </p>
+
+            <div style={{ textAlign: 'left', background: '#eff6ff', padding: '14px', borderRadius: '12px', fontSize: '13px', color: '#1e40af' }}>
+              <strong>■ 再開について</strong>
+              <p style={{ margin: '4px 0 0', fontSize: '12px' }}>
+                状況の安全が確認でき次第、順次サービスを再開いたします。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3-1, 4-1: ヘッダー (左上アイコン asunowa.png ＆ タブ表示改善) */}
       <header
         className="topbar"
         style={{
@@ -216,172 +277,82 @@ export default function Page() {
           position: 'sticky',
           top: 0,
           zIndex: 40,
-          padding: '0 20px',
-          height: '68px',
+          padding: '0 16px',
+          minHeight: '68px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
         }}
       >
-        {/* ロゴ & ブランド */}
-        <Link href="/" className="brand" aria-label="明日の環（アスノワ）ホーム" style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div className="brand-mark" style={{ background: 'transparent', padding: 0 }}>
-            <img src="/asunowa.png" alt="明日の環" style={{ width: '32px', height: '32px', objectFit: 'contain', borderRadius: '50%' }} />
-          </div>
-          <div>
-            <strong style={{ fontSize: '17px', letterSpacing: '0.04em', color: '#0f172a' }}>明日の環</strong>
-            <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>アスノワ 災害時共助</span>
-          </div>
-        </Link>
-
-        {/* PC 上部タブナビゲーション (仕様書 1.2項, 7.1項: PCでは上部タブナビゲーションを採用) */}
-        <nav
-          className="desktop-nav"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: '#f1f5f9',
-            padding: '4px',
-            borderRadius: '10px',
-          }}
-        >
-          {(['ホーム', '地図', '検索', '投稿', 'チャット', 'マイページ'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => selectTab(t)}
-              style={{
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: tab === t ? 700 : 500,
-                cursor: 'pointer',
-                background: tab === t ? '#ffffff' : 'transparent',
-                color: tab === t ? '#0284c7' : '#475569',
-                boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
-
-        {/* ヘッダー右側: 登録地域 + 災害レベル + ユーザー情報 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* 登録地域 & 災害レベル (仕様書: ヘッダー内の「災害地域」の右隣にLvを表示) */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: '#f8fafc',
-              border: '1px solid #cbd5e1',
-              padding: '6px 12px',
-              borderRadius: '20px',
-              fontSize: '12px',
-            }}
-          >
-            <MapPin size={14} color="#0284c7" />
-            <span><b>{user.disaster_prefecture} {user.disaster_city}</b></span>
-            <span
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: '10px',
-                color: '#ffffff',
-                background: currentDisasterLevel === 3 ? '#ef4444' : currentDisasterLevel > 0 ? '#eab308' : '#16a34a',
-              }}
-            >
-              Lv.{currentDisasterLevel}
-            </span>
-          </div>
-
-          {/* ユーザー表示名・役割 */}
-          <Link
-            href="/account"
-            style={{
-              textDecoration: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              background: '#f1f5f9',
-              color: '#334155',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
-          >
-            <UserRound size={15} />
-            <span>{user.name}</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '8px', padding: '6px 0' }}>
+          {/* 4-1 左上アイコン public/asunowa.png */}
+          <Link href="/" className="brand" aria-label="明日の環 ホーム" style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <img src="/asunowa.png" alt="明日の環" style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+            <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <strong style={{ fontSize: '16px', letterSpacing: '0.02em', color: '#0f172a', display: 'block' }}>明日の環</strong>
+              <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>アスノワ災害時共助</span>
+            </div>
           </Link>
 
-          {/* 管理者リンク */}
-          <Link
-            href="/admin"
-            className="secondary-button"
-            style={{ fontSize: '11px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
-            title="管理者コンソール"
-          >
-            <ShieldCheck size={14} />
-            <span className="admin-btn-text">管理画面</span>
-          </Link>
+          {/* 右上: 活動地域 & レベル */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {user.disaster_city && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '16px', fontSize: '12px' }}>
+                <MapPin size={13} color="#0284c7" />
+                <span><b>{user.disaster_city}</b></span>
+                <span style={{ fontSize: '10px', fontWeight: 'bold', background: currentDisasterLevel === 3 ? '#ef4444' : '#16a34a', color: '#ffffff', padding: '1px 6px', borderRadius: '8px' }}>
+                  Lv.{currentDisasterLevel}
+                </span>
+              </div>
+            )}
+
+            <Link href="/account" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#334155', background: '#f8fafc', padding: '5px 10px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+              <UserRound size={15} />
+              <span>{user.name || 'マイページ'}</span>
+              {user.is_verified && <img src="/ninsyou.png" alt="認証" style={{ height: '14px' }} />}
+            </Link>
+          </div>
         </div>
+
       </header>
 
-      {/* 凍結時のバナー通知 (仕様書 20.2項) */}
-      {user.account_status === 'frozen' && (
-        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecdd3', color: '#991b1b', padding: '10px 20px', fontSize: '12px', textAlign: 'center' }}>
-          <b>【アカウント凍結中】</b> ログイン・地図閲覧・検索閲覧は可能ですが、投稿・チャット・通報機能はご利用いただけません。
-        </div>
-      )}
-
-      {/* 災害レベル3時のアラートバー */}
-      {currentDisasterLevel >= 3 && (
-        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fee2e2', color: '#b91c1c', padding: '10px 20px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-          <AlertTriangle size={16} />
-          <span><b>危険レベル(Lv.3)：</b> {user.disaster_prefecture}{user.disaster_city}周辺では安全確保のため新規物資投稿・マッチング受付を一時停止しています。</span>
+      {/* アラートロックメッセージ モーダル */}
+      {modalLockMsg && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 8000, display: 'grid', placeItems: 'center', padding: '20px' }}>
+          <div style={{ background: '#ffffff', padding: '24px', borderRadius: '16px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+            <AlertTriangle size={36} color="#ef4444" style={{ marginBottom: '12px' }} />
+            <h3 style={{ margin: '0 0 10px', fontSize: '17px' }}>利用制限・お知らせ</h3>
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.6, marginBottom: '20px' }}>{modalLockMsg}</p>
+            <button className="primary-button full" onClick={() => setModalLockMsg(null)}>
+              確認しました
+            </button>
+          </div>
         </div>
       )}
 
       {/* メインコンテンツ エリア */}
-      <div style={{ flex: 1, maxWidth: '1080px', width: '100%', margin: '0 auto', padding: '24px 16px 80px' }}>
-        
-        {/* ホームタブ */}
-        {tab === 'ホーム' && (
+      <div style={{ flex: 1, maxWidth: '1080px', width: '100%', margin: '0 auto', padding: '20px 16px 80px' }}>
+
+        {/* 7. 地図タブ */}
+        {tab === '地図' && (
           <div>
-            <div style={{ background: '#ffffff', borderRadius: '16px', padding: '32px 24px', border: '1px solid #e2e8f0', marginBottom: '24px', textAlign: 'center' }}>
-              <h1 style={{ fontSize: '26px', margin: '0 0 12px', color: '#0f172a' }}>
-                必要な人と、支えたい人をつなぐ共助プラットフォーム
-              </h1>
-              <p style={{ fontSize: '14px', color: '#64748b', maxWidth: '600px', margin: '0 auto 24px', lineHeight: 1.6 }}>
-                明日の環（アスノワ）は、被災時の物資支援や危険箇所の情報共有を、地域の安全レベルに合わせて提供する共助アプリです。
-              </p>
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button type="button" className="primary-button" onClick={() => setTab('検索')}>
-                  <Search size={16} /> 物資支援一覧を見る
-                </button>
-                <button type="button" className="secondary-button" onClick={() => setTab('地図')}>
-                  <MapPin size={16} /> 地図で安全情報を確認
-                </button>
-              </div>
-            </div>
+            <DisasterMap
+              role={user.role === 'admin' ? '管理者' : user.user_role === 'victim' ? '被災者' : '支援者'}
+              onNotice={showNotice}
+            />
           </div>
         )}
 
-        {/* 検索タブ content */}
+        {/* 5. 検索タブ */}
         {tab === '検索' && (
           <div>
-            <div className="content-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px' }}>
+            <div className="content-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <p className="eyebrow" style={{ color: '#0284c7', fontWeight: 700, fontSize: '12px', margin: '0 0 4px' }}>
-                  共助マッチング一覧
+                <p style={{ color: '#0284c7', fontWeight: 700, fontSize: '12px', margin: '0 0 4px' }}>
+                  活動地域（基準地域）優先表示中
                 </p>
-                <h1 style={{ fontSize: '24px', margin: 0, color: '#0f172a' }}>
+                <h1 style={{ fontSize: '22px', margin: 0, color: '#0f172a' }}>
                   {user.user_role === 'victim' ? '支援者の「提供」物資一覧' : user.user_role === 'supporter' ? '被災者の「依頼」物資一覧' : '支援「依頼・提供」一覧'}
                 </h1>
               </div>
@@ -393,7 +364,7 @@ export default function Page() {
                 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Plus size={16} />
-                {user.user_role === 'victim' ? '依頼を投稿する' : user.user_role === 'supporter' ? '提供を投稿する' : '新規投稿を作成'}
+                新規投稿を作成
               </button>
             </div>
 
@@ -405,13 +376,12 @@ export default function Page() {
                   <input
                     value={query}
                     onChange={e => setQuery(e.target.value)}
-                    placeholder="物資名、市区町村名、投稿者名で検索..."
+                    placeholder="物資名・市区町村・投稿者で検索..."
                   />
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', alignItems: 'center', color: '#64748b' }}>
-                {/* 共助ユーザー向け種別切り替え */}
                 {user.user_role === 'both' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span>種別:</span>
@@ -456,425 +426,307 @@ export default function Page() {
                     onChange={e => setCategoryFilter(e.target.value)}
                     style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                   >
-                    <option value="すべて">全カテゴリ</option>
-                    <option value="食料">食料</option>
-                    <option value="飲料">飲料</option>
-                    <option value="衣類">衣類</option>
-                    <option value="医薬品">医薬品</option>
-                    <option value="生活用品">生活用品</option>
-                    <option value="電気機器">電気機器</option>
-                    <option value="乳幼児用品">乳幼児用品</option>
-                    <option value="その他">その他</option>
+                    {['すべて', '食料', '飲料', '衣類', '医薬品', '生活用品', '電気機器', '乳幼児用品', 'その他'].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
                   </select>
                 </div>
               </div>
             </div>
 
-            {/* 投稿カード一覧 */}
-            <div className="request-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
-              {postsList.length === 0 ? (
-                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#64748b' }}>
-                  <Package size={40} style={{ marginBottom: '12px', color: '#94a3b8' }} />
-                  <h3 style={{ fontSize: '16px', margin: '0 0 6px' }}>該当する投稿がありません</h3>
-                  <p style={{ fontSize: '13px', margin: 0 }}>検索条件を変更するか、右上のボタンから新規投稿を行ってください。</p>
-                </div>
-              ) : (
-                postsList.map(post => {
-                  const postLevel = getLocationDisasterLevel(post.received_location)
-                  const isOffer = post.type === 'offer'
-
+            {/* 投稿一覧 (8. 12時間以内表示 & 認証マーク表示) */}
+            {postsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>
+                <Package size={40} style={{ marginBottom: '12px' }} />
+                <h3>条件に一致する投稿が見つかりません</h3>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+                {postsList.map(post => {
+                  const is12h = isWithin12Hours(post.created_at)
                   return (
-                    <article
+                    <div
                       key={post.id}
-                      className="request-card"
                       style={{
                         background: '#ffffff',
-                        border: isOffer ? '1px solid #bbf7d0' : '1px solid #fed7aa',
+                        border: '1px solid #e2e8f0',
                         borderRadius: '14px',
                         padding: '18px',
                         display: 'flex',
                         flexDirection: 'column',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                        justifyContent: 'space-between',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
                       }}
                     >
-                      <div className="card-top" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            padding: '3px 8px',
-                            borderRadius: '4px',
-                            background: isOffer ? '#166534' : '#c2410c',
-                            color: '#ffffff',
-                          }}
-                        >
-                          【{isOffer ? '提供' : '依頼'}】
-                        </span>
-
-                        <Badge tone={post.urgency === '高' ? 'red' : post.urgency === '中' ? 'amber' : 'blue'}>
-                          緊急度: {post.urgency}
-                        </Badge>
-
-                        {postLevel >= 3 && (
-                          <span style={{ fontSize: '10px', background: '#ef4444', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
-                            受取地Lv.3停止中
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: post.type === 'request' ? '#fef2f2' : '#f0fdf4',
+                              color: post.type === 'request' ? '#991b1b' : '#166534',
+                            }}
+                          >
+                            {post.type === 'request' ? '支援依頼' : '支援提供'} [{post.categories && post.categories.length > 0 ? post.categories.join('・') : post.category}]
                           </span>
-                        )}
 
-                        <span className="card-time" style={{ marginLeft: 'auto', fontSize: '11px', color: '#64748b' }}>
-                          <Clock3 size={12} /> {new Date(post.created_at).toLocaleDateString('ja-JP')}
+                          {/* 8. 12時間以内表示 */}
+                          {is12h && (
+                            <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold', background: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
+                              🟢 12時間以内
+                            </span>
+                          )}
+                        </div>
+
+                        {/* タイトル削除仕様のため説明を重視表示 */}
+                        <p style={{ fontSize: '15px', color: '#0f172a', fontWeight: 600, margin: '0 0 10px', lineHeight: 1.5 }}>
+                          {post.description}
+                        </p>
+
+                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px' }}>
+                          受け取り場所: <b>{post.received_location}</b>
+                        </div>
+
+                        <div style={{ fontSize: '12px', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>投稿者: <b>{post.user_name}</b></span>
+                          {/* 名前横の認証マーク */}
+                          {post.is_verified_user && (
+                            <img src="/ninsyou.png" alt="認証" style={{ height: '15px' }} title="本人確認済み" />
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
-                      </div>
-
-                      <h3 style={{ fontSize: '16px', margin: '4px 0 8px', color: '#0f172a', fontWeight: 700 }}>
-                        {post.title}
-                      </h3>
-                      
-                      <p className="card-body" style={{ color: '#334155', fontSize: '13px', lineHeight: 1.5, marginBottom: '12px', flex: 1 }}>
-                        {post.description}
-                      </p>
-
-                      {/* 投稿者表示名 (仕様書 10.2項: 投稿には必ず投稿者の表示名を表示する) */}
-                      <div style={{ fontSize: '12px', color: '#475569', marginBottom: '10px', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px' }}>
-                        <div>投稿者：<b>{post.user_name || '明日の環ユーザー'}</b></div>
-                        <div style={{ marginTop: '2px', color: '#64748b' }}><MapPin size={12} style={{ display: 'inline' }} /> 受取地: {post.received_location}</div>
-                      </div>
-
-                      <div className="card-bottom" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
-                        <button
-                          type="button"
-                          className="text-button"
-                          style={{ color: '#e11d48', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px', cursor: 'pointer' }}
-                          onClick={() => setReportTargetPost(post)}
-                        >
-                          <Flag size={13} /> 通報
-                        </button>
 
                         <button
                           type="button"
                           className="primary-button"
-                          onClick={() => setSelectedPost(post)}
-                          style={{
-                            background: postLevel >= 3 ? '#94a3b8' : isOffer ? '#166534' : '#c2410c',
-                            color: 'white',
-                            border: 'none',
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            fontSize: '12px',
-                            cursor: 'pointer',
-                          }}
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          onClick={() => handleApplyPost(post)}
                         >
-                          詳細・{isOffer ? '受け取る' : '支援する'} <ChevronRight size={14} />
+                          {post.type === 'request' ? '支援を申し出る' : '物資を受け取る'}
                         </button>
                       </div>
-                    </article>
+                    </div>
                   )
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        {/* 投稿作成タブ content */}
+        {/* 4. 投稿タブ (タイトル欄を完全削除 & 例表示) */}
         {tab === '投稿' && (
-          <div className="form-wrap" style={{ maxWidth: '640px', margin: '0 auto' }}>
-            <div className="form-intro" style={{ marginBottom: '18px' }}>
-              <div className="big-icon" style={{ background: '#e0f2fe', color: '#0284c7' }}>
-                <HeartHandshake size={24} />
-              </div>
-              <div>
-                <h2 style={{ fontSize: '18px', margin: 0 }}>
-                  {user.user_role === 'victim' ? '支援の依頼を投稿' : user.user_role === 'supporter' ? '物資の提供を投稿' : '新規物資投稿（依頼 / 提供）'}
-                </h2>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0' }}>
-                  投稿者名として「<b>{user.name}</b>」が表示されます。
-                </p>
-              </div>
-            </div>
+          <div style={{ maxWidth: '640px', margin: '0 auto', background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+            <h2 style={{ fontSize: '20px', margin: '0 0 6px', color: '#0f172a' }}>支援情報の新規投稿</h2>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+              被災者の方は必要な物資依頼を、支援者の方は提供可能な物資を登録してください。
+            </p>
 
-            <div className="form-card" style={{ background: '#ffffff', borderRadius: '14px', padding: '24px', border: '1px solid #e2e8f0' }}>
-              {/* 共助ユーザー向けの依頼/提供選択 */}
+            <form onSubmit={e => { e.preventDefault(); submitPost(); }} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+
+              {/* 共助ユーザー向け種別選択 */}
               {user.user_role === 'both' && (
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '6px' }}>投稿の種類</label>
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>投稿の種別</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, postType: 'request' })}
                       style={{
-                        flex: 1,
                         padding: '10px',
                         borderRadius: '8px',
-                        border: form.postType === 'request' ? '2px solid #c2410c' : '1px solid #cbd5e1',
-                        background: form.postType === 'request' ? '#fff7ed' : '#ffffff',
-                        color: form.postType === 'request' ? '#c2410c' : '#475569',
-                        fontWeight: 700,
-                        cursor: 'pointer',
+                        border: form.postType === 'request' ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                        background: form.postType === 'request' ? '#fef2f2' : '#ffffff',
+                        color: form.postType === 'request' ? '#b91c1c' : '#475569',
+                        fontWeight: 'bold',
                       }}
                     >
-                      依頼（物資を必要としている）
+                      支援の依頼 (必要)
                     </button>
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, postType: 'offer' })}
                       style={{
-                        flex: 1,
                         padding: '10px',
                         borderRadius: '8px',
-                        border: form.postType === 'offer' ? '2px solid #166534' : '1px solid #cbd5e1',
+                        border: form.postType === 'offer' ? '2px solid #16a34a' : '1px solid #cbd5e1',
                         background: form.postType === 'offer' ? '#f0fdf4' : '#ffffff',
-                        color: form.postType === 'offer' ? '#166534' : '#475569',
-                        fontWeight: 700,
-                        cursor: 'pointer',
+                        color: form.postType === 'offer' ? '#15803d' : '#475569',
+                        fontWeight: 'bold',
                       }}
                     >
-                      提供（物資をお渡しできる）
+                      支援の提供 (お渡し)
                     </button>
                   </div>
                 </div>
               )}
 
-              <label style={{ display: 'block', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700 }}>タイトル</span>
-                <input
-                  value={form.title}
-                  onChange={e => setForm({ ...form, title: e.target.value })}
-                  placeholder={form.postType === 'request' ? '例：粉ミルクとおむつMサイズが必要です' : '例：保存水500ml 24本お渡しできます'}
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
-                />
-              </label>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <label>
-                  <span style={{ fontSize: '12px', fontWeight: 700 }}>カテゴリ</span>
-                  <select
-                    value={form.category}
-                    onChange={e => setForm({ ...form, category: e.target.value as PostCategory })}
-                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
-                  >
-                    <option value="食料">食料</option>
-                    <option value="飲料">飲料</option>
-                    <option value="衣類">衣類</option>
-                    <option value="医薬品">医薬品</option>
-                    <option value="生活用品">生活用品</option>
-                    <option value="電気機器">電気機器</option>
-                    <option value="乳幼児用品">乳幼児用品</option>
-                    <option value="その他">その他</option>
-                  </select>
+              {/* 5-1. 物資カテゴリの複数選択対応 */}
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '4px', color: '#334155' }}>
+                  物資カテゴリ (複数選択可能)
                 </label>
-
-                <label>
-                  <span style={{ fontSize: '12px', fontWeight: 700 }}>数量（任意）</span>
-                  <input
-                    value={form.quantity}
-                    onChange={e => setForm({ ...form, quantity: e.target.value })}
-                    placeholder="例：24本、3箱"
-                    style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
-                  />
-                </label>
+                <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '8px' }}>
+                  ※複数選択できます。あてはまるものをすべて選択してください。
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                  {(['食料', '飲料水', '衣類', '医薬品', '生活用品', '衛生用品', '電気機器', '乳幼児用品', 'その他'] as PostCategory[]).map(cat => {
+                    const isChecked = form.categories.includes(cat)
+                    return (
+                      <label
+                        key={cat}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: isChecked ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                          background: isChecked ? '#f0f9ff' : '#ffffff',
+                          color: isChecked ? '#0284c7' : '#334155',
+                          fontWeight: isChecked ? 'bold' : 'normal',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setForm(prev => ({ ...prev, categories: [...prev.categories, cat] }))
+                            } else {
+                              setForm(prev => ({ ...prev, categories: prev.categories.filter(c => c !== cat) }))
+                            }
+                          }}
+                          style={{ accentColor: '#0284c7', width: '16px', height: '16px', cursor: 'pointer' }}
+                        />
+                        <span>{cat}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
 
-              {/* 受け取り場所設定 */}
-              <div style={{ marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>受け取り場所（都道府県・市区町村・施設名等）</span>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '8px' }}>
+              {/* 4. 受け取り場所入力欄 (例表示: 例：物資ロッカー ○○前) */}
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>受け取り場所</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
                   <select
                     value={form.placePref}
                     onChange={e => {
                       const pref = e.target.value
-                      setForm({ ...form, placePref: pref, placeCity: getCitiesByPrefecture(pref)[0]?.city || '' })
+                      const cities = getCitiesByPrefecture(pref)
+                      setForm({ ...form, placePref: pref, placeCity: cities[0]?.city || '' })
                     }}
-                    style={{ padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                   >
-                    {PREFECTURES.map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
+                    {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
-
                   <select
                     value={form.placeCity}
                     onChange={e => setForm({ ...form, placeCity: e.target.value })}
-                    style={{ padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                   >
-                    {availableCitiesForPost.map(c => (
-                      <option key={c.city} value={c.city}>{c.city}</option>
-                    ))}
+                    {availableCitiesForPost.map(c => <option key={c.city} value={c.city}>{c.city}</option>)}
                   </select>
                 </div>
-
                 <input
+                  type="text"
+                  placeholder="例：物資ロッカー ○○前"
                   value={form.placeDetail}
                   onChange={e => setForm({ ...form, placeDetail: e.target.value })}
-                  placeholder="例：〇〇避難所前、市役所第2駐車場"
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 />
               </div>
 
-              <div style={{ marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '6px' }}>緊急度</span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {(['低', '中', '高'] as UrgencyLevel[]).map(x => (
-                    <button
-                      type="button"
-                      key={x}
-                      onClick={() => setForm({ ...form, urgency: x })}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        borderRadius: '6px',
-                        border: form.urgency === x ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                        background: form.urgency === x ? '#f0f9ff' : '#ffffff',
-                        color: form.urgency === x ? '#0284c7' : '#334155',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {x}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <label style={{ display: 'block', marginBottom: '16px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700 }}>詳細・補足説明</span>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>詳細内容・説明</label>
                 <textarea
+                  placeholder="物資の数量や渡し方などの詳細を入力してください"
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  placeholder="受取希望日時やアレルギーの有無、受取方法などを入力してください"
                   rows={4}
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 />
-              </label>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button type="button" className="secondary-button" onClick={() => setDraftSaved(true)}>
-                  <FileText size={15} /> 下書き保存
-                </button>
-                <button type="button" className="primary-button" onClick={submitPost}>
-                  <Send size={15} /> 投稿を公開する
-                </button>
               </div>
 
-              {draftSaved && <p className="saved-note" style={{ marginTop: '10px', color: '#16a34a', fontSize: '12px' }}><Check size={14} /> 下書きを保存しました</p>}
-            </div>
+              <button type="submit" className="primary-button full" style={{ padding: '12px', fontSize: '15px', fontWeight: 'bold', justifyContent: 'center' }}>
+                支援情報を投稿する
+              </button>
+            </form>
           </div>
         )}
 
-        {/* 地図タブ content */}
-        {tab === '地図' && (
-          <DisasterMap onNotice={showNotice} role={user.role === 'admin' ? '管理者' : user.user_role === 'victim' ? '被災者' : '支援者'} />
-        )}
       </div>
 
-      {/* モバイル用ボトムナビゲーション (仕様書 7.1項: スマホでも押しやすい形で表示) */}
-      <nav className="mobile-nav">
-        {([
-          { name: '検索', icon: Search },
-          { name: '投稿', icon: Plus },
-          { name: '地図', icon: MapPin },
-          { name: 'チャット', icon: MessageCircle },
-          { name: 'マイページ', icon: UserRound },
-        ] as const).map((item) => {
-          const IconComp = item.icon
-          const isActive = tab === item.name
-          return (
-            <button
-              key={item.name}
-              type="button"
-              className={isActive ? 'active' : ''}
-              onClick={() => selectTab(item.name as Tab)}
-            >
-              <IconComp size={20} />
-              <span>{item.name}</span>
-            </button>
-          )
-        })}
-      </nav>
-
-      {/* 投稿詳細モーダル */}
-      {selectedPost && (
-        <div className="modal-backdrop" onClick={() => setSelectedPost(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', maxWidth: '480px', width: '92%' }}>
-            <button className="modal-close" onClick={() => setSelectedPost(null)}>
-              <X size={18} />
-            </button>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: selectedPost.type === 'offer' ? '#166534' : '#c2410c' }}>
-              【{selectedPost.type === 'offer' ? '提供' : '依頼'}】
-            </span>
-            <h2 style={{ fontSize: '18px', margin: '8px 0 10px' }}>{selectedPost.title}</h2>
-            <p style={{ fontSize: '13px', color: '#334155', lineHeight: 1.6, marginBottom: '14px' }}>{selectedPost.description}</p>
-
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', fontSize: '12px', color: '#475569', marginBottom: '16px' }}>
-              <div><b>投稿者：</b> {selectedPost.user_name}</div>
-              <div style={{ marginTop: '4px' }}><b>受け取り場所：</b> {selectedPost.received_location}</div>
-              <div style={{ marginTop: '4px' }}><b>カテゴリ：</b> {selectedPost.category}</div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ color: '#e11d48', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                onClick={() => {
-                  const target = selectedPost
-                  setSelectedPost(null)
-                  setReportTargetPost(target)
-                }}
-              >
-                <Flag size={14} /> 通報
-              </button>
-
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => handleApplyPost(selectedPost)}
-                style={{ flex: 1, justifyContent: 'center', padding: '10px' }}
-              >
-                <HeartHandshake size={16} />
-                {selectedPost.type === 'offer' ? 'この提供物資を受け取る (マッチング)' : 'この依頼を支援する (マッチング)'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* レベル制限・凍結モーダル */}
-      {modalLockMsg && (
-        <div className="modal-backdrop" onClick={() => setModalLockMsg(null)}>
-          <div className="modal locked-state" onClick={e => e.stopPropagation()} style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
-            <LockKeyhole size={36} color="#ef4444" style={{ marginBottom: '12px' }} />
-            <h2 style={{ fontSize: '17px', marginBottom: '10px', color: '#0f172a' }}>機能利用制限</h2>
-            <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.6, marginBottom: '18px' }}>
-              {modalLockMsg}
-            </p>
-            <button className="primary-button full" onClick={() => setModalLockMsg(null)} style={{ padding: '10px', width: '100%', justifyContent: 'center' }}>
-              確認しました
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 通報モーダル */}
-      {reportTargetPost && (
-        <ReportModal
-          isOpen={true}
-          onClose={() => setReportTargetPost(null)}
-          targetType="post"
-          targetId={reportTargetPost.id}
-          targetTitle={reportTargetPost.title}
-          targetAuthorName={reportTargetPost.user_name}
-          onReportSuccess={() => {
-            showNotice('通報を受け付けました')
+      {/* フッター：ページ切り替えタブ */}
+      {/* 3-1: ページ切り替えタブ (PCで文字切れを防ぎ横スクロール対応) */}
+      <footer
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 1000,
+          background: '#ffffff',
+          borderTop: '1px solid #e2e8f0',
+          boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.05)',
+        }}
+      >
+        <nav
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '8px',
+            width: '100%',
+            padding: '8px 12px',
+            boxSizing: 'border-box',
+            overflowX: 'auto',
           }}
-        />
-      )}
-
-      {/* トースト通知 Toast */}
-      {notice && (
-        <div className="toast">
-          <Check size={17} /> {notice}
-        </div>
-      )}
+        >
+          {(['検索', '投稿', '地図', 'チャット', 'マイページ'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => selectTab(t)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: tab === t ? '#e0f2fe' : 'transparent',
+                color: tab === t ? '#0284c7' : '#475569',
+                fontWeight: tab === t ? 700 : 500,
+                fontSize: '14px',
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                flexShrink: 0,
+              }}
+            >
+              {t === '検索' && <Search size={15} />}
+              {t === '投稿' && <Plus size={15} />}
+              {t === '地図' && <MapIcon size={15} />}
+              {t === 'チャット' && <MessageSquare size={15} />}
+              {t === 'マイページ' && <UserRound size={15} />}
+              <span>{t}</span>
+            </button>
+          ))}
+        </nav>
+      </footer>
     </main>
   )
 }

@@ -13,6 +13,11 @@ import {
   ReportReason,
   ReportTargetType,
   MapPinItem,
+  PinCategory,
+  VoteDetail,
+  ShelterReport,
+  SubPostItem,
+  SystemStatus,
 } from './types'
 
 export type {
@@ -29,10 +34,30 @@ export type {
   ReportReason,
   ReportTargetType,
   MapPinItem,
+  PinCategory,
+  VoteDetail,
+  ShelterReport,
+  SubPostItem,
+  SystemStatus,
 }
 
-
 const STORAGE_KEY_PREFIX = 'asunowa_'
+
+// 12時間以内判定
+export function isWithin12Hours(dateStr: string): boolean {
+  if (!dateStr) return false
+  const time = new Date(dateStr).getTime()
+  const diffHours = (Date.now() - time) / (1000 * 60 * 60)
+  return diffHours >= 0 && diffHours <= 12
+}
+
+// ユーザーコード生成
+export function generateUserCode(): string {
+  const rand = Math.floor(1000 + Math.random() * 9000)
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+  const char = letters[Math.floor(Math.random() * letters.length)]
+  return `ASU-${rand}-${char}`
+}
 
 // 全国市区町村の初期災害レベル (初期値 Lv0)
 const INITIAL_DISASTER_LEVELS: DisasterLevelItem[] = CITIES_DATA.map(c => ({
@@ -42,9 +67,25 @@ const INITIAL_DISASTER_LEVELS: DisasterLevelItem[] = CITIES_DATA.map(c => ({
   updated_at: new Date().toISOString(),
 }))
 
-// デモ用の初期ユーザー
-const INITIAL_USER: UserProfile = {
+// 未ログイン状態の初期ユーザー（1-1-1 仕様）
+const INITIAL_UNLOGGED_USER: UserProfile = {
+  id: 'user_unregistered',
+  user_code: '',
+  name: '',
+  role: 'user',
+  user_role: 'victim',
+  disaster_prefecture: '',
+  disaster_city: '',
+  account_status: 'active',
+  is_demo: false,
+  is_verified: false,
+}
+
+// デモユーザーの初期データ (1-2, 3-1-1 仕様: 会員証発行済み)
+const INITIAL_DEMO_USER: UserProfile = {
   id: 'user_demo_1',
+  user_code: 'ASU-9900-DEMO',
+  card_id: 'CARD-2026-88192',
   name: 'あすのわ太郎',
   role: 'user',
   user_role: 'victim', // victim, supporter, both
@@ -52,15 +93,26 @@ const INITIAL_USER: UserProfile = {
   disaster_city: '米子市',
   account_status: 'active',
   is_demo: true,
-  linked_google: true,
-  linked_line: false,
+  is_verified: true,
+  birth_date: '1995年4月12日',
+  issue_date: '2026年01月15日',
+  expire_date: '2028年01月15日',
+  verified_at: '2026-01-15T10:00:00Z',
+  verified_method: '公的個人認証サービス（マイナンバーカード）',
+  supporter_qualification: '防災士・普通救命講習修了',
+  audit_logs: [
+    { timestamp: '2026-01-15 10:00:00', action: '本人確認承認', details: 'マイナンバーカード公的署名による自動照合成功' },
+    { timestamp: '2026-02-01 14:20:00', action: '資格情報更新', details: '防災士資格証明書の提示を確認' },
+  ],
 }
 
-// 登録ユーザー一覧（管理者用）
+// 登録ユーザー一覧（ログイン・管理者照合用）
 const INITIAL_ALL_USERS: UserProfile[] = [
-  INITIAL_USER,
+  INITIAL_DEMO_USER,
   {
     id: 'user_supporter_1',
+    user_code: 'ASU-1024-SUPP',
+    card_id: 'CARD-2026-11024',
     name: '佐藤 健',
     role: 'user',
     user_role: 'supporter',
@@ -68,12 +120,19 @@ const INITIAL_ALL_USERS: UserProfile[] = [
     disaster_city: '米子市',
     account_status: 'active',
     is_demo: false,
+    is_verified: true,
     email: 'sato@example.com',
-    linked_google: true,
-    linked_line: true,
+    birth_date: '1988年11月03日',
+    issue_date: '2026年02月01日',
+    expire_date: '2028年02月01日',
+    verified_at: '2026-02-01T11:30:00Z',
+    verified_method: '運転免許証確認',
+    supporter_qualification: 'ボランティア経験多数',
   },
   {
     id: 'user_victim_1',
+    user_code: 'ASU-5512-VICT',
+    card_id: 'CARD-2026-55120',
     name: '鈴木 花子',
     role: 'user',
     user_role: 'victim',
@@ -81,12 +140,13 @@ const INITIAL_ALL_USERS: UserProfile[] = [
     disaster_city: '鳥取市',
     account_status: 'active',
     is_demo: false,
+    is_verified: false,
     email: 'suzuki@example.com',
-    linked_google: true,
-    linked_line: false,
   },
   {
     id: 'user_admin_master',
+    user_code: 'ASU-0000-ADMIN',
+    card_id: 'CARD-ADMIN-00001',
     name: '管理者 (明日の環運営)',
     role: 'admin',
     user_role: 'both',
@@ -94,9 +154,11 @@ const INITIAL_ALL_USERS: UserProfile[] = [
     disaster_city: '千代田区',
     account_status: 'active',
     is_demo: false,
+    is_verified: true,
     email: 'admin@asunowa.jp',
-    linked_google: true,
-    linked_line: false,
+    birth_date: '1980年01月01日',
+    issue_date: '2026年01月01日',
+    expire_date: '2030年01月01日',
   },
 ]
 
@@ -106,6 +168,7 @@ const INITIAL_POSTS: PostItem[] = [
     id: 'post_1',
     user_id: 'user_supporter_1',
     user_name: '佐藤 健',
+    is_verified_user: true,
     type: 'offer',
     category: '飲料',
     title: '500mlミネラルウォーター 24本提供可能',
@@ -123,6 +186,7 @@ const INITIAL_POSTS: PostItem[] = [
     id: 'post_2',
     user_id: 'user_victim_1',
     user_name: '鈴木 花子',
+    is_verified_user: false,
     type: 'request',
     category: '乳幼児用品',
     title: '粉ミルクとMサイズおむつが緊急で必要です',
@@ -140,6 +204,7 @@ const INITIAL_POSTS: PostItem[] = [
     id: 'post_3',
     user_id: 'user_supporter_2',
     user_name: '高橋 誠',
+    is_verified_user: true,
     type: 'offer',
     category: '電気機器',
     title: 'モバイルバッテリー・ポータブル電源貸出',
@@ -157,6 +222,7 @@ const INITIAL_POSTS: PostItem[] = [
     id: 'post_4',
     user_id: 'user_supporter_3',
     user_name: '山本 一郎',
+    is_verified_user: false,
     type: 'offer',
     category: '衣類',
     title: '防寒着・大人用毛布 5枚',
@@ -181,8 +247,10 @@ const INITIAL_CHATS: ChatSession[] = [
     post_title: '保存食・カンパン 10箱のお渡し',
     victim_id: 'user_demo_1',
     victim_name: 'あすのわ太郎',
+    victim_is_verified: true,
     supporter_id: 'user_supporter_1',
     supporter_name: '佐藤 健',
+    supporter_is_verified: true,
     status: 'supporting',
     support_started_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
@@ -192,6 +260,7 @@ const INITIAL_CHATS: ChatSession[] = [
         chat_id: 'chat_demo_1',
         sender_id: 'user_supporter_1',
         sender_name: '佐藤 健',
+        sender_is_verified: true,
         body: 'はじめまして。保存食10箱をお持ちします。避難所入口で15時頃いかがでしょうか？',
         created_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
       },
@@ -200,6 +269,7 @@ const INITIAL_CHATS: ChatSession[] = [
         chat_id: 'chat_demo_1',
         sender_id: 'user_demo_1',
         sender_name: 'あすのわ太郎',
+        sender_is_verified: true,
         body: '大変助かります！15時に避難所入口でお待ちしております。',
         created_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
       },
@@ -208,6 +278,7 @@ const INITIAL_CHATS: ChatSession[] = [
         chat_id: 'chat_demo_1',
         sender_id: 'user_supporter_1',
         sender_name: '佐藤 健',
+        sender_is_verified: true,
         body: 'ただいま車で移動開始いたしました。「支援を開始する」を押しました。',
         created_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
       },
@@ -215,65 +286,94 @@ const INITIAL_CHATS: ChatSession[] = [
   },
 ]
 
-// 初期地図ピン
+// 初期地図ピン (井戸・自販機・避難所を含む)
 const INITIAL_MAP_PINS: MapPinItem[] = [
   {
     id: 'pin_1',
     type: '避難所',
-    title: '輪島市立体育館',
-    author: '自治体確認済み',
-    content: '確認済み避難所。現在受け入れ可能です。',
-    lat: 37.39,
-    lng: 136.9,
+    title: '米子市総合体育館 避難所',
+    author: '米子市防災課',
+    author_is_verified: true,
+    content: '物資受取・仮眠スペースあり。給水口設置済み。',
+    lat: 35.435,
+    lng: 133.34,
     verified: true,
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 12,
+    different_count: 0,
+    shelter_reports: [
+      {
+        id: 'sr_1',
+        user_id: 'user_demo_1',
+        user_name: 'あすのわ太郎',
+        people_count: '約120名',
+        gender_ratio: '男性4:女性6 (高齢者多数)',
+        facility_details: '暖房稼働中、毛布追加配布あり。ペット同伴スペース屋外に確保。',
+        created_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+      },
+    ],
   },
   {
     id: 'pin_2',
-    type: '指定物資置き場',
-    title: '輪島市 支援物資置き場',
-    author: '輪島市',
-    content: '支援物資の受け取り場所です。',
-    lat: 37.395,
-    lng: 136.91,
-    verified: true,
+    type: '井戸',
+    title: '河井町 公共生活用水井戸',
+    author: '地域ボランティア',
+    author_is_verified: true,
+    content: '手押しポンプ使用可能。飲用には煮沸推奨。生活用水としてご利用ください。',
+    lat: 35.429,
+    lng: 133.332,
+    created_at: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 5,
+    different_count: 0,
   },
   {
     id: 'pin_3',
-    type: '通行注意',
-    title: '県道249号',
-    author: '佐藤 花子',
-    content: '片側通行。大型車は注意してください。',
-    lat: 37.375,
-    lng: 136.93,
+    type: '自販機',
+    title: '米子駅前 災害時フリー自販機',
+    author: '駅前商店会',
+    author_is_verified: true,
+    content: '停電時無料供給モード稼働中。ボタンを押すだけで飲料が出てきます。',
+    lat: 35.423,
+    lng: 133.336,
+    created_at: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 8,
+    different_count: 1,
   },
   {
     id: 'pin_4',
     type: '浸水',
-    title: '米子市役所周辺',
+    title: '米子市役所周辺 冠水情報',
     author: '山田 健',
-    content: '道路冠水に注意してください。',
+    author_is_verified: false,
+    content: '水深約15cm。普通車の通行は低速なら可能ですが注意してください。',
     lat: 35.4281,
     lng: 133.3308,
+    created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 3,
+    different_count: 0,
   },
   {
     id: 'pin_5',
-    type: '避難所',
-    title: '米子市総合体育館',
-    author: '米子市防災',
-    content: '物資受け入れ・避難スペース開設中',
-    lat: 35.435,
-    lng: 133.34,
-    verified: true,
+    type: '通行注意',
+    title: '加茂川橋付近 ひび割れ',
+    author: '佐藤 健',
+    author_is_verified: true,
+    content: '橋梁面に段差発生。片側交互通行となっています。',
+    lat: 35.432,
+    lng: 133.328,
+    created_at: new Date(Date.now() - 1000 * 60 * 300).toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 7,
+    different_count: 0,
   },
 ]
 
@@ -297,14 +397,38 @@ function setStorage<T>(key: string, value: T): void {
   }
 }
 
+// システム全面停止ステータス
+export function getSystemStatus(): SystemStatus {
+  return getStorage<SystemStatus>('system_status', { is_stopped: false })
+}
+
+export function saveSystemStopped(stopped: boolean): SystemStatus {
+  const status: SystemStatus = {
+    is_stopped: stopped,
+    stopped_at: stopped ? new Date().toISOString() : undefined,
+  }
+  setStorage('system_status', status)
+  return status
+}
+
 // ユーザー情報
 export function getUserProfile(): UserProfile {
-  return getStorage<UserProfile>('user', INITIAL_USER)
+  return getStorage<UserProfile>('user', INITIAL_UNLOGGED_USER)
 }
 
 export function saveUserProfile(profile: Partial<UserProfile>): UserProfile {
   const current = getUserProfile()
-  const updated = { ...current, ...profile, updated_at: new Date().toISOString() }
+  let userCode = current.user_code
+  if (!userCode && (profile.name || profile.disaster_city)) {
+    userCode = generateUserCode()
+  }
+
+  const updated: UserProfile = {
+    ...current,
+    ...profile,
+    user_code: profile.user_code ?? userCode ?? '',
+    updated_at: new Date().toISOString(),
+  }
   setStorage('user', updated)
 
   // 管理者用全ユーザーリストも同期
@@ -312,12 +436,54 @@ export function saveUserProfile(profile: Partial<UserProfile>): UserProfile {
   const idx = allUsers.findIndex(u => u.id === updated.id)
   if (idx >= 0) {
     allUsers[idx] = updated
-  } else {
+  } else if (updated.id !== 'user_unregistered') {
     allUsers.push(updated)
   }
   setStorage('all_users', allUsers)
 
   return updated
+}
+
+export function setDemoUserMode(role: UserRole = 'victim'): UserProfile {
+  const updatedDemo: UserProfile = {
+    ...INITIAL_DEMO_USER,
+    user_role: role,
+  }
+  setStorage('user', updatedDemo)
+  return updatedDemo
+}
+
+export function setAdminUserMode(): UserProfile {
+  const adminUser = INITIAL_ALL_USERS.find(u => u.role === 'admin') || INITIAL_ALL_USERS[3]
+  setStorage('user', adminUser)
+  return adminUser
+}
+
+export function loginWithUserCode(code: string): { success: boolean; user?: UserProfile; error?: string } {
+  const cleanCode = code.trim().toUpperCase()
+  if (!cleanCode) return { success: false, error: 'ユーザーコードを入力してください' }
+
+  const allUsers = getAllUsers()
+  const found = allUsers.find(u => u.user_code.toUpperCase() === cleanCode)
+  if (found) {
+    setStorage('user', found)
+    return { success: true, user: found }
+  }
+
+  const newUser: UserProfile = {
+    id: 'user_' + Date.now(),
+    user_code: cleanCode,
+    name: '一般ユーザー (' + cleanCode.slice(-4) + ')',
+    role: 'user',
+    user_role: 'victim',
+    disaster_prefecture: '鳥取県',
+    disaster_city: '米子市',
+    account_status: 'active',
+    is_demo: false,
+    is_verified: false,
+  }
+  saveUserProfile(newUser)
+  return { success: true, user: newUser }
 }
 
 export function getAllUsers(): UserProfile[] {
@@ -364,6 +530,7 @@ export function saveDisasterLevel(pref: string, city: string, level: number): Di
 }
 
 export function getCityDisasterLevel(pref: string, city: string): number {
+  if (!pref || !city) return 0
   const levels = getDisasterLevels()
   const found = levels.find(l => l.prefecture === pref && l.city === city)
   return found ? found.level : 0
@@ -396,7 +563,6 @@ export function updatePost(postId: string, updatedFields: Partial<PostItem>): { 
   const idx = posts.findIndex(p => p.id === postId)
   if (idx < 0) return { success: false, error: '投稿が見つかりませんでした' }
 
-  // 自分の投稿か、または管理者のみ編集可能
   if (posts[idx].user_id !== user.id && user.role !== 'admin') {
     return { success: false, error: '他のユーザーの投稿は編集できません' }
   }
@@ -425,7 +591,6 @@ export function deletePost(postId: string): { success: boolean; error?: string }
     return { success: false, error: '他のユーザーの投稿は削除できません' }
   }
 
-  // 完全削除またはステータス変更
   posts.splice(idx, 1)
   setStorage('posts', posts)
   return { success: true }
@@ -433,9 +598,8 @@ export function deletePost(postId: string): { success: boolean; error?: string }
 
 export function getSortedFilteredPosts(userPref: string, userCity: string, userRole: UserRole): PostItem[] {
   const posts = getPosts()
-  const userCityInfo = findCity(userPref, userCity) ?? { lat: 35.4281, lng: 133.3308 }
+  const userCityInfo = (userPref && userCity) ? (findCity(userPref, userCity) ?? { lat: 35.4281, lng: 133.3308 }) : { lat: 35.4281, lng: 133.3308 }
 
-  // 共助 (both) の場合は依頼と提供の双方を閲覧・表示、victimは提供のみ、supporterは依頼のみ
   const filtered = posts.filter(p => {
     if (p.status === 'hidden' || p.status === 'deleted') return false
     if (userRole === 'victim') return p.type === 'offer'
@@ -446,6 +610,13 @@ export function getSortedFilteredPosts(userPref: string, userCity: string, userR
   const urgencyScore = { 高: 3, 中: 2, 低: 1 }
 
   return [...filtered].sort((a, b) => {
+    const aIsMatchPrefCity = a.received_prefecture === userPref && a.received_city === userCity
+    const bIsMatchPrefCity = b.received_prefecture === userPref && b.received_city === userCity
+
+    if (aIsMatchPrefCity !== bIsMatchPrefCity) {
+      return aIsMatchPrefCity ? -1 : 1
+    }
+
     const locA = parseLocation(a.received_location)
     const locB = parseLocation(b.received_location)
 
@@ -467,8 +638,9 @@ export function getSortedFilteredPosts(userPref: string, userCity: string, userR
 }
 
 export function addPost(newPostData: {
-  title: string
-  category: PostCategory
+  title?: string
+  category?: PostCategory
+  categories?: PostCategory[]
   description: string
   received_location: string
   urgency: UrgencyLevel
@@ -495,18 +667,25 @@ export function addPost(newPostData: {
     }
   }
 
-  // 投稿タイプ：共助は選択したtype、被災者はrequest、支援者はoffer
   let postType: PostType = newPostData.type || (user.user_role === 'victim' ? 'request' : 'offer')
   if (user.user_role === 'victim') postType = 'request'
   if (user.user_role === 'supporter') postType = 'offer'
+
+  const selectedCategories: PostCategory[] = (newPostData.categories && newPostData.categories.length > 0)
+    ? newPostData.categories
+    : (newPostData.category ? [newPostData.category] : ['その他'])
+
+  const primaryCategory = selectedCategories[0]
 
   const created: PostItem = {
     id: 'post_' + Date.now(),
     user_id: user.id,
     user_name: user.name || '明日の環ユーザー',
+    is_verified_user: !!user.is_verified,
     type: postType,
-    category: newPostData.category,
-    title: newPostData.title,
+    category: primaryCategory,
+    categories: selectedCategories,
+    title: newPostData.title || `${selectedCategories.join('・')}に関するお知らせ・受付`,
     description: newPostData.description,
     received_location: newPostData.received_location,
     received_prefecture: parsed.prefecture,
@@ -531,26 +710,38 @@ export function getMapPins(): MapPinItem[] {
   return getStorage<MapPinItem[]>('map_pins', INITIAL_MAP_PINS)
 }
 
+// 7-1 ピン投稿 (直近15km以内判定 & 投稿タイトルの非必須)
 export function addMapPin(pinData: {
-  type: MapPinItem['type']
-  title: string
-  content: string
+  type: PinCategory
+  title?: string
+  content?: string
   lat: number
   lng: number
   photo?: string
+  userLat?: number
+  userLng?: number
 }): { success: boolean; pin?: MapPinItem; error?: string } {
   const user = getUserProfile()
   if (user.account_status === 'frozen') {
     return { success: false, error: 'ご利用のアカウントは凍結されているため、ピンの設置はできません。' }
   }
 
+  // 15km以内距離チェック
+  if (pinData.userLat !== undefined && pinData.userLng !== undefined) {
+    const distKm = calculateDistanceKm(pinData.userLat, pinData.userLng, pinData.lat, pinData.lng)
+    if (distKm > 15) {
+      return { success: false, error: '位置情報が離れているため、ピンを立てられません' }
+    }
+  }
+
   const newPin: MapPinItem = {
     id: 'pin_' + Date.now(),
     user_id: user.id,
     author: user.name || '地域ユーザー',
+    author_is_verified: !!user.is_verified,
     type: pinData.type,
-    title: pinData.title,
-    content: pinData.content,
+    title: pinData.title || `${pinData.type}の地点情報`,
+    content: pinData.content || '',
     lat: pinData.lat,
     lng: pinData.lng,
     photo: pinData.photo,
@@ -558,12 +749,140 @@ export function addMapPin(pinData: {
     created_at: new Date().toISOString(),
     report_count: 0,
     status: 'published',
+    correct_count: 0,
+    different_count: 0,
   }
 
   const pins = getMapPins()
   const updated = [newPin, ...pins]
   setStorage('map_pins', updated)
   return { success: true, pin: newPin }
+}
+
+// 9. 「正しい〇」「異なる✕」確認・投票機能 (2km以内 & 補足情報追加)
+export function votePin(
+  pinId: string,
+  voteType: 'correct' | 'different',
+  comment?: string,
+  photoUrl?: string,
+  userLat?: number,
+  userLng?: number
+): { success: boolean; pin?: MapPinItem; error?: string } {
+  const user = getUserProfile()
+  if (user.account_status === 'frozen') {
+    return { success: false, error: 'ご利用のアカウントは凍結されているため操作できません。' }
+  }
+
+  const pins = getMapPins()
+  const pin = pins.find(p => p.id === pinId)
+  if (!pin) return { success: false, error: '該当のピンが見つかりません' }
+
+  // 2km以内チェック
+  if (userLat !== undefined && userLng !== undefined) {
+    const distKm = calculateDistanceKm(userLat, userLng, pin.lat, pin.lng)
+    if (distKm > 2) {
+      return { success: false, error: '投稿地点から離れているため、確認・投票を行えません（2km以内が必要）。' }
+    }
+  }
+
+  const userVoted = pin.user_voted || {}
+  if (userVoted[user.id]) {
+    return { success: false, error: 'すでにこの投稿へ評価を投票済みです。' }
+  }
+
+  userVoted[user.id] = voteType
+  pin.user_voted = userVoted
+
+  if (voteType === 'correct') {
+    pin.correct_count = (pin.correct_count || 0) + 1
+  } else {
+    pin.different_count = (pin.different_count || 0) + 1
+  }
+
+  if (comment || photoUrl) {
+    const detail: VoteDetail = {
+      id: 'vdet_' + Date.now(),
+      user_id: user.id,
+      user_name: user.name || '確認者',
+      vote_type: voteType,
+      comment: comment?.trim(),
+      file_url: photoUrl,
+      created_at: new Date().toISOString(),
+    }
+    pin.vote_details = [detail, ...(pin.vote_details || [])]
+  }
+
+  setStorage('map_pins', pins)
+  return { success: true, pin }
+}
+
+// 12. 避難所への情報投稿 (人数、男女比、設備詳細 2km以内)
+export function addShelterReport(
+  pinId: string,
+  peopleCount: string,
+  genderRatio: string,
+  facilityDetails: string,
+  userLat?: number,
+  userLng?: number
+): { success: boolean; pin?: MapPinItem; error?: string } {
+  const user = getUserProfile()
+  if (user.account_status === 'frozen') {
+    return { success: false, error: 'ご利用のアカウントは凍結されているため操作できません。' }
+  }
+
+  const pins = getMapPins()
+  const pin = pins.find(p => p.id === pinId)
+  if (!pin) return { success: false, error: '避難所が見つかりません' }
+
+  if (userLat !== undefined && userLng !== undefined) {
+    const distKm = calculateDistanceKm(userLat, userLng, pin.lat, pin.lng)
+    if (distKm > 2) {
+      return { success: false, error: '避難所から離れているため、情報投稿できません（2km以内が必要）。' }
+    }
+  }
+
+  const report: ShelterReport = {
+    id: 'shelter_rep_' + Date.now(),
+    user_id: user.id,
+    user_name: user.name || '情報提供者',
+    people_count: peopleCount.trim(),
+    gender_ratio: genderRatio.trim(),
+    facility_details: facilityDetails.trim(),
+    created_at: new Date().toISOString(),
+  }
+
+  pin.shelter_reports = [report, ...(pin.shelter_reports || [])]
+  setStorage('map_pins', pins)
+  return { success: true, pin }
+}
+
+// 10. 同じ場所への複数投稿追加
+export function addSubPostToPin(
+  pinId: string,
+  content: string,
+  photo?: string
+): { success: boolean; pin?: MapPinItem; error?: string } {
+  const user = getUserProfile()
+  if (user.account_status === 'frozen') {
+    return { success: false, error: 'ご利用のアカウントは凍結されているため操作できません。' }
+  }
+
+  const pins = getMapPins()
+  const pin = pins.find(p => p.id === pinId)
+  if (!pin) return { success: false, error: '該当のピンが見つかりません' }
+
+  const subPost: SubPostItem = {
+    id: 'subp_' + Date.now(),
+    user_id: user.id,
+    user_name: user.name || '投稿者',
+    content: content.trim(),
+    photo,
+    created_at: new Date().toISOString(),
+  }
+
+  pin.sub_posts = [subPost, ...(pin.sub_posts || [])]
+  setStorage('map_pins', pins)
+  return { success: true, pin }
 }
 
 export function deleteMapPin(pinId: string): { success: boolean; error?: string } {
@@ -573,7 +892,7 @@ export function deleteMapPin(pinId: string): { success: boolean; error?: string 
   return { success: true }
 }
 
-// 通報システム (仕様書: 重複防止、選択肢、5件以上で一時非表示)
+// 通報システム
 export function getReports(): ReportItem[] {
   return getStorage<ReportItem[]>('reports', [])
 }
@@ -597,7 +916,6 @@ export function createReport(data: {
 
   const reports = getReports()
 
-  // 同一ユーザーによる同一対象への重複通報チェック
   const alreadyReported = reports.some(
     r => r.reporter_user_id === user.id && r.target_type === data.target_type && r.target_id === data.target_id
   )
@@ -622,7 +940,6 @@ export function createReport(data: {
   reports.push(newReport)
   setStorage('reports', reports)
 
-  // 対象の通報カウントをインクリメントし、5件以上なら自動的に一時非表示 (hidden)
   const targetReportsCount = reports.filter(
     r => r.target_type === data.target_type && r.target_id === data.target_id && r.status !== 'rejected'
   ).length
@@ -659,14 +976,12 @@ export function handleAdminReportAction(reportId: string, action: 'delete' | 're
 
   if (action === 'delete') {
     rep.status = 'deleted'
-    // 対象データを完全削除
     if (rep.target_type === 'post') {
       deletePost(rep.target_id)
     } else if (rep.target_type === 'map_pin') {
       deleteMapPin(rep.target_id)
     }
   } else {
-    // 却下：公開状態に戻す
     rep.status = 'rejected'
     if (rep.target_type === 'post') {
       const posts = getPosts()
@@ -755,14 +1070,18 @@ export function applyAndCreateMatch(postId: string): { success: boolean; chat?: 
 
   let victimId = user.id
   let victimName = user.name
+  let victimVerified = !!user.is_verified
   let supporterId = post.user_id
   let supporterName = post.user_name
+  let supporterVerified = !!post.is_verified_user
 
   if (post.type === 'request') {
     victimId = post.user_id
     victimName = post.user_name
+    victimVerified = !!post.is_verified_user
     supporterId = user.id
     supporterName = user.name
+    supporterVerified = !!user.is_verified
   }
 
   post.status = 'マッチ済み'
@@ -775,8 +1094,10 @@ export function applyAndCreateMatch(postId: string): { success: boolean; chat?: 
     post_title: post.title,
     victim_id: victimId,
     victim_name: victimName,
+    victim_is_verified: victimVerified,
     supporter_id: supporterId,
     supporter_name: supporterName,
+    supporter_is_verified: supporterVerified,
     status: 'before_support',
     created_at: new Date().toISOString(),
     messages: [
@@ -785,7 +1106,8 @@ export function applyAndCreateMatch(postId: string): { success: boolean; chat?: 
         chat_id: 'chat_' + Date.now(),
         sender_id: user.id,
         sender_name: user.name,
-        body: `マッチングが成立しました！物資「${post.title}」について連絡を開始します。`,
+        sender_is_verified: !!user.is_verified,
+        body: `マッチングが成立しました！「${post.title}」について連絡を開始します。`,
         created_at: new Date().toISOString(),
       },
     ],
@@ -831,7 +1153,8 @@ export function startSupport(chatId: string): { success: boolean; chat?: ChatSes
     chat_id: chat.id,
     sender_id: chat.supporter_id,
     sender_name: chat.supporter_name || '支援者',
-    body: '【支援開始】支援者が出達・移動を開始しました。',
+    sender_is_verified: chat.supporter_is_verified,
+    body: '【支援開始】支援者が出発・移動を開始しました。',
     created_at: new Date().toISOString(),
   })
 
@@ -880,6 +1203,7 @@ export function confirmSupportCompletion(chatId: string, role: UserRole): { succ
       chat_id: chat.id,
       sender_id: role === 'victim' ? chat.victim_id : chat.supporter_id,
       sender_name: role === 'victim' ? (chat.victim_name || '被災者') : (chat.supporter_name || '支援者'),
+      sender_is_verified: role === 'victim' ? chat.victim_is_verified : chat.supporter_is_verified,
       body: `【完了確認】支援完了を確認しました。相手の確認を待っています。`,
       created_at: now,
     })
@@ -908,6 +1232,7 @@ export function sendChatMessage(chatId: string, senderId: string, senderName: st
     chat_id: chatId,
     sender_id: senderId,
     sender_name: senderName,
+    sender_is_verified: !!user.is_verified,
     body: body.trim(),
     created_at: new Date().toISOString(),
   }

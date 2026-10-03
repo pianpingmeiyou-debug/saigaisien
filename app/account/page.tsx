@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
   UserRound, MapPin, HeartHandshake, ShieldCheck, FileText,
-  Trash2, Edit3, Check, AlertTriangle, ArrowLeft, Plus, Link2, ExternalLink
+  Trash2, Edit3, Check, AlertTriangle, ArrowLeft, Plus, LogIn,
+  KeyRound, HelpCircle, X, ShieldAlert, Sparkles, Navigation
 } from 'lucide-react'
 import {
   getUserProfile, saveUserProfile, getMyPosts, deletePost,
-  updatePost, getCityDisasterLevel
+  updatePost, getCityDisasterLevel, setDemoUserMode, setAdminUserMode, loginWithUserCode
 } from '@/lib/store'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import { UserRole, PostItem, PostCategory } from '@/lib/types'
@@ -22,11 +23,20 @@ export default function AccountPage() {
   const [editingPost, setEditingPost] = useState<PostItem | null>(null)
   const [notice, setNotice] = useState('')
 
+  // ユーザーコードログイン用入力
+  const [inputUserCode, setInputUserCode] = useState('')
+
+  // 会員証モーダル表示フラグ
+  const [showCardModal, setShowCardModal] = useState(false)
+
+  // 現在地共有推奨バナー表示フラグ
+  const [showGpsRecommendation, setShowGpsRecommendation] = useState(true)
+
   // 編集用フォーム
   const [displayName, setDisplayName] = useState(user.name)
   const [userRole, setUserRole] = useState<UserRole>(user.user_role || 'victim')
-  const [selectedPref, setSelectedPref] = useState(user.disaster_prefecture)
-  const [selectedCity, setSelectedCity] = useState(user.disaster_city)
+  const [selectedPref, setSelectedPref] = useState(user.disaster_prefecture || '鳥取県')
+  const [selectedCity, setSelectedCity] = useState(user.disaster_city || '米子市')
 
   // 投稿編集用
   const [editTitle, setEditTitle] = useState('')
@@ -38,8 +48,8 @@ export default function AccountPage() {
     setUser(u)
     setDisplayName(u.name)
     setUserRole(u.user_role)
-    setSelectedPref(u.disaster_prefecture)
-    setSelectedCity(u.disaster_city)
+    setSelectedPref(u.disaster_prefecture || '鳥取県')
+    setSelectedCity(u.disaster_city || '米子市')
     setMyPosts(getMyPosts(u.id))
   }
 
@@ -49,13 +59,13 @@ export default function AccountPage() {
 
   const showToast = (text: string) => {
     setNotice(text)
-    setTimeout(() => setNotice(''), 2600)
+    setTimeout(() => setNotice(''), 3000)
   }
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault()
     if (!displayName.trim()) {
-      showToast('表示名を入力してください')
+      showToast('公開表示名を入力してください')
       return
     }
 
@@ -66,18 +76,44 @@ export default function AccountPage() {
       disaster_city: selectedCity,
     })
     setUser(updated)
-    showToast('プロフィールと登録地域を更新しました')
+    showToast('プロフィールと活動地域を更新しました')
   }
 
-  const toggleProvider = (provider: 'google' | 'line') => {
-    if (provider === 'google') {
-      const updated = saveUserProfile({ linked_google: !user.linked_google })
-      setUser(updated)
-      showToast(updated.linked_google ? 'Googleアカウントを連携しました' : 'Googleアカウント連携を解除しました')
+  // デモボタンハンドラ
+  const handleSwitchToDemo = () => {
+    const updated = setDemoUserMode('victim')
+    setUser(updated)
+    setDisplayName(updated.name)
+    setUserRole(updated.user_role)
+    setSelectedPref(updated.disaster_prefecture)
+    setSelectedCity(updated.disaster_city)
+    showToast('デモユーザーとして切り替えました（会員証発行済み）')
+  }
+
+  // 管理者ボタンハンドラ
+  const handleSwitchToAdmin = () => {
+    const updated = setAdminUserMode()
+    setUser(updated)
+    showToast('管理者アカウントに切り替えました。管理者画面へ遷移します')
+    setTimeout(() => {
+      router.push('/admin')
+    }, 600)
+  }
+
+  // ユーザーコードログインハンドラ
+  const handleUserCodeLogin = (e: React.FormEvent) => {
+    e.preventDefault()
+    const res = loginWithUserCode(inputUserCode)
+    if (res.success && res.user) {
+      setUser(res.user)
+      setDisplayName(res.user.name)
+      setUserRole(res.user.user_role)
+      setSelectedPref(res.user.disaster_prefecture || '鳥取県')
+      setSelectedCity(res.user.disaster_city || '米子市')
+      setInputUserCode('')
+      showToast(`ユーザーコード (${res.user.user_code}) でログインしました`)
     } else {
-      const updated = saveUserProfile({ linked_line: !user.linked_line })
-      setUser(updated)
-      showToast(updated.linked_line ? 'LINEアカウントを連携しました' : 'LINEアカウント連携を解除しました')
+      showToast(res.error || 'ログインに失敗しました')
     }
   }
 
@@ -124,36 +160,158 @@ export default function AccountPage() {
 
   return (
     <main className="standalone-page" style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
-      <header className="standalone-header">
-        <Link href="/" className="icon-button" aria-label="ホームへ戻る">
-          <ArrowLeft size={20} />
-        </Link>
-        <div className="brand">
-          <span className="brand-mark">
-            <UserRound size={21} />
-          </span>
-          <span>
-            <strong>マイページ</strong>
-            <small>アカウント・登録地域・投稿履歴</small>
-          </span>
+      {/* 通知トースト */}
+      {notice && (
+        <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#ffffff', padding: '10px 20px', borderRadius: '20px', fontSize: '13px', zIndex: 9999, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+          {notice}
+        </div>
+      )}
+
+      {/* ヘッダー (1-2: 管理者切り替えボタン維持) */}
+      <header className="standalone-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Link href="/" className="icon-button" aria-label="アプリトップへ戻る">
+            <ArrowLeft size={20} />
+          </Link>
+          <div className="brand">
+            <span className="brand-mark">
+              <UserRound size={21} />
+            </span>
+            <span>
+              <strong>マイページ</strong>
+              <small>アカウント・活動地域・デジタル会員証</small>
+            </span>
+          </div>
+        </div>
+
+        {/* 1-1-1, 1-2: デモ & 管理者ボタン */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ fontSize: '12px', padding: '6px 10px', background: '#e0f2fe', color: '#0369a1', borderColor: '#bae6fd' }}
+            onClick={handleSwitchToDemo}
+          >
+            <Sparkles size={14} /> デモ
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ fontSize: '12px', padding: '6px 10px', background: '#fef3c7', color: '#92400e', borderColor: '#fde68a' }}
+            onClick={handleSwitchToAdmin}
+          >
+            <ShieldAlert size={14} /> 管理者
+          </button>
         </div>
       </header>
 
-      {/* 凍結ユーザー警告文言 (仕様書 第20.2項 厳格準拠) */}
+      {/* 1-1-1: 現在地共有推奨画面/バナー */}
+      {showGpsRecommendation && (
+        <div style={{ background: '#eff6ff', borderBottom: '1px solid #bfdbfe', padding: '12px 20px', fontSize: '13px', color: '#1e40af' }}>
+          <div style={{ maxWidth: '780px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <Navigation size={18} style={{ color: '#2563eb', flexShrink: 0 }} />
+              <div>
+                <strong>現在地の共有をおすすめします</strong>
+                <span style={{ display: 'block', fontSize: '12px', color: '#3b82f6' }}>
+                  現在地共有を有効にすると、最寄りの避難所・支援ピンの投稿や確認がスムーズに行えます。
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              style={{ padding: '4px 12px', fontSize: '12px', flexShrink: 0 }}
+              onClick={() => {
+                if (navigator.geolocation) {
+                  navigator.geolocation.getCurrentPosition(() => showToast('現在地の共有を許可しました'))
+                }
+                setShowGpsRecommendation(false)
+              }}
+            >
+              許可・確認
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 凍結ユーザー警告文言 */}
       {user.account_status === 'frozen' && (
         <div style={{ background: '#fef2f2', borderBottom: '2px solid #ef4444', color: '#991b1b', padding: '16px 24px', fontSize: '13px', lineHeight: 1.6 }}>
           <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
             <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: '2px', color: '#ef4444' }} />
             <div>
               <strong style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>ご利用のアカウントは凍結されています</strong>
-              ご利用のアカウントは、凍結されています。慎重に審査した結果、明日の環ルールに違反していると判断いたしました。そのため、ログイン・地図閲覧・検索閲覧は可能ですが、投稿・チャット・通報機能はご利用いただけません。ご理解の程、よろしくお願いいたします。
+              ご利用のアカウントは、凍結されています。投稿・チャット・通報機能はご利用いただけません。
             </div>
           </div>
         </div>
       )}
 
       <section className="standalone-content" style={{ maxWidth: '780px', margin: '0 auto', padding: '24px 16px' }}>
-        
+
+        {/* 1-1-1: ユーザーコードログインバー */}
+        <div style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+          <form onSubmit={handleUserCodeLogin} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <KeyRound size={18} style={{ color: '#0284c7' }} />
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', color: '#334155' }}>
+                ユーザーコードを入力してログイン
+              </label>
+              <input
+                type="text"
+                placeholder="例: ASU-8829-X39"
+                value={inputUserCode}
+                onChange={(e) => setInputUserCode(e.target.value)}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
+              />
+            </div>
+            <button type="submit" className="primary-button" style={{ padding: '8px 16px', fontSize: '13px' }}>
+              ログイン
+            </button>
+          </form>
+        </div>
+
+        {/* 7-1, 8-1: デジタル会員証エリア (明るい青系背景・ユーザーコード表示は基本プロフィール設定内に移動) */}
+        <div style={{ background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)', color: '#ffffff', padding: '20px 24px', borderRadius: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', boxShadow: '0 4px 14px rgba(2, 132, 199, 0.25)' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <ShieldCheck size={22} style={{ color: '#bae6fd' }} />
+              <strong style={{ fontSize: '18px', color: '#ffffff' }}>デジタル会員証</strong>
+              {user.is_verified && (
+                <img src="/ninsyou.png" alt="認証" style={{ height: '20px', width: 'auto' }} title="本人確認済み" />
+              )}
+            </div>
+            <p style={{ margin: 0, fontSize: '13px', color: '#e0f2fe' }}>
+              {user.is_demo
+                ? 'デモユーザーはデジタル会員証が発行されています。'
+                : '本人確認をすると、デジタル会員証・認証マークが発行されます。'}
+            </p>
+          </div>
+
+          <div>
+            {user.is_demo || user.is_verified ? (
+              <button
+                type="button"
+                className="primary-button"
+                style={{ background: '#38bdf8', color: '#0f172a', fontWeight: 'bold', padding: '10px 18px' }}
+                onClick={() => setShowCardModal(true)}
+              >
+                会員証を表示
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ background: 'rgba(255,255,255,0.15)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.3)', padding: '10px 18px' }}
+                onClick={() => showToast('本人確認機能は現在準備中です（後日機能追加予定）')}
+              >
+                本人確認をする
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* タブ切り替え */}
         <div style={{ display: 'flex', gap: '10px', borderBottom: '2px solid #e2e8f0', marginBottom: '24px' }}>
           <button
@@ -171,7 +329,7 @@ export default function AccountPage() {
               marginBottom: '-2px',
             }}
           >
-            プロフィール・地域・役割
+            プロフィール・活動地域
           </button>
           <button
             type="button"
@@ -216,14 +374,12 @@ export default function AccountPage() {
                   required
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 />
-                <small style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>
-                  ※投稿やチャットに表示される名前です。Google/LINEの本名は直接公開されません。
-                </small>
               </div>
 
+              {/* 1-2, 3-3: 現在の役割 (後から変更可能) */}
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
-                  現在の役割
+                  現在の役割（変更可能）
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                   {(
@@ -254,10 +410,14 @@ export default function AccountPage() {
                 </div>
               </div>
 
+              {/* 3-3: 活動地域（基準地域） */}
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
-                  登録地域（基準地域）
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '4px' }}>
+                  活動地域（基準地域）
                 </label>
+                <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#0284c7', background: '#f0f9ff', padding: '8px 12px', borderRadius: '6px' }}>
+                  被災者は、現在の地域を。支援者は、支援したい地域を登録してください。地図上ではその情報が優先して表示されます。
+                </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <select
                     value={selectedPref}
@@ -289,7 +449,7 @@ export default function AccountPage() {
                   </select>
                 </div>
                 <div style={{ marginTop: '8px', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <MapPin size={14} /> 現在の登録地域災害レベル: <b>Lv.{currentDisasterLevel}</b>
+                  <MapPin size={14} /> 現在の活動地域災害レベル: <b>Lv.{currentDisasterLevel}</b>
                 </div>
               </div>
 
@@ -298,66 +458,21 @@ export default function AccountPage() {
                 className="primary-button"
                 style={{ padding: '12px', justifyContent: 'center', fontWeight: 700, marginTop: '8px' }}
               >
-                プロフィール設定を保存
+                プロフィール・活動地域を保存
               </button>
+
+              {/* 8-1 ユーザコードの配置変更（基本プロフィール設定内・保存ボタンの下） */}
+              {user.user_code && (
+                <div style={{ marginTop: '12px', padding: '14px 16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '13px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>ユーザコード：</span>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0284c7', fontFamily: 'monospace', letterSpacing: '1px', marginTop: '4px' }}>
+                    [{user.user_code}]
+                  </div>
+                </div>
+              )}
             </form>
-
-            {/* Google / LINE アカウント連携 */}
-            <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-              <h3 style={{ fontSize: '16px', margin: '0 0 8px', color: '#0f172a' }}>Google・LINE アカウント連携</h3>
-              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px', lineHeight: 1.5 }}>
-                GoogleとLINEを同一アカウントへ連携できます。どちらの認証方法からでも同一の投稿・プロフィールへログイン可能です。
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', background: user.linked_google ? '#f0fdf4' : '#ffffff' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontWeight: 600, fontSize: '14px' }}>Google アカウント</span>
-                    {user.linked_google && <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>連携済み</span>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleProvider('google')}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: '1px solid #cbd5e1',
-                      background: user.linked_google ? '#f8fafc' : '#0284c7',
-                      color: user.linked_google ? '#475569' : '#ffffff',
-                    }}
-                  >
-                    {user.linked_google ? '連携解除' : 'Googleを連携'}
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', background: user.linked_line ? '#f0fdf4' : '#ffffff' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontWeight: 600, fontSize: '14px' }}>LINE アカウント</span>
-                    {user.linked_line && <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>連携済み</span>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleProvider('line')}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: '1px solid #cbd5e1',
-                      background: user.linked_line ? '#f8fafc' : '#06c755',
-                      color: user.linked_line ? '#475569' : '#ffffff',
-                    }}
-                  >
-                    {user.linked_line ? '連携解除' : 'LINEを連携'}
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
+
         )}
 
         {/* 投稿履歴タブ */}
@@ -398,62 +513,39 @@ export default function AccountPage() {
                           fontWeight: 700,
                           padding: '2px 8px',
                           borderRadius: '4px',
-                          background: post.type === 'offer' ? '#166534' : '#c2410c',
-                          color: '#ffffff',
+                          background: post.type === 'request' ? '#fef2f2' : '#f0fdf4',
+                          color: post.type === 'request' ? '#991b1b' : '#166534',
                         }}
                       >
-                        【{post.type === 'offer' ? '提供' : '依頼'}】
+                        {post.type === 'request' ? '支援依頼' : '支援提供'}
                       </span>
                       <span style={{ fontSize: '12px', color: '#64748b' }}>
-                        投稿日: {new Date(post.created_at).toLocaleDateString('ja-JP')}
+                        {new Date(post.created_at).toLocaleDateString('ja-JP')}
                       </span>
                     </div>
 
-                    <h3 style={{ fontSize: '16px', margin: '4px 0 6px', color: '#0f172a' }}>{post.title}</h3>
-                    <p style={{ fontSize: '13px', color: '#334155', margin: '0 0 10px', lineHeight: 1.5 }}>
-                      {post.description}
-                    </p>
-
-                    <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '14px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                      <span>受取場所: <b>{post.received_location}</b></span>
-                      <span>ステータス: <b>{post.status}</b></span>
+                    <h3 style={{ fontSize: '16px', margin: '0 0 6px', color: '#0f172a' }}>{post.title}</h3>
+                    <p style={{ fontSize: '13px', color: '#475569', margin: '0 0 10px', lineHeight: 1.5 }}>{post.description}</p>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
+                      受け取り・引き渡し場所: <b>{post.received_location}</b>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                       <button
                         type="button"
+                        className="secondary-button"
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
                         onClick={() => openEditPost(post)}
-                        style={{
-                          background: '#f8fafc',
-                          border: '1px solid #cbd5e1',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
                       >
-                        <Edit3 size={13} /> 編集
+                        <Edit3 size={14} /> 編集
                       </button>
                       <button
                         type="button"
+                        className="danger-button"
+                        style={{ padding: '6px 12px', fontSize: '12px' }}
                         onClick={() => handleDeletePost(post.id)}
-                        style={{
-                          background: '#fff5f5',
-                          border: '1px solid #fca5a5',
-                          color: '#dc2626',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
                       >
-                        <Trash2 size={13} /> 削除
+                        <Trash2 size={14} /> 削除
                       </button>
                     </div>
                   </div>
@@ -462,62 +554,119 @@ export default function AccountPage() {
             )}
           </div>
         )}
+
       </section>
 
-      {/* 投稿編集モーダル */}
-      {editingPost && (
-        <div className="modal-backdrop" onClick={() => setEditingPost(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', maxWidth: '480px', width: '92%' }}>
-            <h2 style={{ fontSize: '18px', margin: '0 0 16px' }}>投稿内容の編集</h2>
-            <form onSubmit={handleSavePostEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px' }}>タイトル</label>
-                <input
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
+      {/* 3-1-3 縦画面学生証風デジタル会員証拡大モーダル */}
+      {showCardModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9000,
+            padding: '16px',
+          }}
+          onClick={() => setShowCardModal(false)}
+        >
+          <div
+            style={{
+              background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+              width: '100%',
+              maxWidth: '340px',
+              borderRadius: '20px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              border: '3px solid #0284c7',
+              position: 'relative',
+              padding: '24px 20px',
+              color: '#0f172a',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                background: '#e2e8f0',
+                border: 'none',
+                borderRadius: '50%',
+                width: '30px',
+                height: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+              onClick={() => setShowCardModal(false)}
+            >
+              <X size={18} />
+            </button>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px' }}>詳細内容</label>
-                <textarea
-                  value={editDesc}
-                  onChange={(e) => setEditDesc(e.target.value)}
-                  rows={4}
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
+            <div style={{ textAlign: 'center', borderBottom: '2px solid #0284c7', paddingBottom: '12px', marginBottom: '16px' }}>
+              <small style={{ letterSpacing: '2px', color: '#0284c7', fontWeight: 'bold', fontSize: '10px', display: 'block' }}>
+                防災共助ネットワーク
+              </small>
+              <h2 style={{ margin: '2px 0 0', fontSize: '18px', fontWeight: '800', color: '#0369a1' }}>
+                デジタル会員証
+              </h2>
+            </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px' }}>受け取り場所</label>
-                <input
-                  type="text"
-                  value={editPlace}
-                  onChange={(e) => setEditPlace(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
+            {/* 顔写真 demo.png */}
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <img
+                src="/demo.png"
+                alt="会員顔写真"
+                style={{
+                  width: '110px',
+                  height: '135px',
+                  objectFit: 'cover',
+                  borderRadius: '12px',
+                  border: '2px solid #cbd5e1',
+                  boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+                }}
+              />
+            </div>
 
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
-                <button type="button" className="secondary-button" onClick={() => setEditingPost(null)}>
-                  キャンセル
-                </button>
-                <button type="submit" className="primary-button">
-                  保存する
-                </button>
+            {/* 名前 ＋ 認証マーク ninsyou.png */}
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <strong style={{ fontSize: '20px', fontWeight: '800' }}>{user.name || 'あすのわ太郎'}</strong>
+                <img src="/ninsyou.png" alt="認証マーク" style={{ height: '22px', width: 'auto' }} title="本人確認済み認証マーク" />
               </div>
-            </form>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                役割：{user.user_role === 'victim' ? '被災者' : user.user_role === 'supporter' ? '支援者' : '被災者＋支援者 (共助)'}
+              </div>
+            </div>
+
+            {/* 3-1-3 必須項目リスト */}
+            <div style={{ background: '#ffffff', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>会員証ID</span>
+                <strong style={{ fontFamily: 'monospace', color: '#0284c7' }}>{user.card_id || 'CARD-2026-88192'}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>生年月日</span>
+                <span>{user.birth_date || '1995年4月12日'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>発行日</span>
+                <span>{user.issue_date || '2026年01月15日'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>有効期限</span>
+                <span>{user.expire_date || '2028年01月15日'}</span>
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: '16px', fontSize: '10px', color: '#94a3b8' }}>
+              アスノワ 災害共助プラットフォーム 発行
+            </div>
           </div>
-        </div>
-      )}
-
-      {notice && (
-        <div className="toast">
-          <Check size={17} /> {notice}
         </div>
       )}
     </main>

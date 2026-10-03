@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   ArrowLeft, MessageCircle, Send, Check, ShieldCheck,
-  AlertTriangle, LockKeyhole, Clock3, ChevronRight, UserRound, Package, MapPin, Flag
+  AlertTriangle, LockKeyhole, Clock3, ChevronRight, ChevronLeft, UserRound, Package, MapPin, Flag, Search, Plus
 } from 'lucide-react'
 import {
   getUserProfile, getChatSessions, getChatSessionById, startSupport,
@@ -26,6 +26,8 @@ function ChatPageContent() {
   const [notice, setNotice] = useState('')
   const [errorModalMsg, setErrorModalMsg] = useState<string | null>(null)
   const [reportTargetUser, setReportTargetUser] = useState<{ id: string; name: string } | null>(null)
+
+  const [isMobileListOpen, setIsMobileListOpen] = useState(false)
 
   useEffect(() => {
     const currentSessions = getChatSessions()
@@ -93,14 +95,12 @@ function ChatPageContent() {
     }
   }
 
-  // 対象投稿の最新災害レベル
   const activePost = activeSession ? getPosts().find(p => p.id === activeSession.post_id) : null
   const postDisasterLevel = activePost ? getLocationDisasterLevel(activePost.received_location) : 0
 
   const isUserSupporter = activeSession ? activeSession.supporter_id === user.id : false
   const isUserVictim = activeSession ? activeSession.victim_id === user.id : false
 
-  // チャットの相手ユーザー情報
   const partnerId = activeSession
     ? activeSession.victim_id === user.id
       ? activeSession.supporter_id
@@ -111,11 +111,16 @@ function ChatPageContent() {
       ? activeSession.supporter_name || '支援者'
       : activeSession.victim_name || '被災者'
     : ''
+  const partnerIsVerified = activeSession
+    ? activeSession.victim_id === user.id
+      ? activeSession.supporter_is_verified
+      : activeSession.victim_is_verified
+    : false
 
   return (
-    <main className="standalone-page" style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '40px' }}>
+    <main className="standalone-page" style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '80px' }}>
       <header className="standalone-header">
-        <Link href="/" className="icon-button" aria-label="ホームへ戻る">
+        <Link href="/" className="icon-button" aria-label="アプリトップへ戻る">
           <ArrowLeft size={20} />
         </Link>
         <div className="brand">
@@ -136,10 +141,42 @@ function ChatPageContent() {
       )}
 
       <section className="standalone-content" style={{ maxWidth: '1000px', margin: '0 auto', padding: '16px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', minHeight: '600px' }}>
+        
+        <div className="mobile-chat-toggle md:hidden" style={{ marginBottom: '12px' }}>
+          <button
+            type="button"
+            onClick={() => setIsMobileListOpen(!isMobileListOpen)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '10px',
+              fontWeight: 600,
+              fontSize: '14px',
+              color: '#0284c7',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MessageCircle size={18} />
+              <span>{isMobileListOpen ? '＜ チャットに戻る' : `＞ メッセージ一覧を開く (${sessions.length})`}</span>
+            </div>
+            {isMobileListOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+          </button>
+        </div>
+
+        <div className="chat-container-layout">
           
-          {/* 左カラム: チャット一覧 */}
-          <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '16px' }}>
+          {/* 左カラム */}
+          <div
+            className={`chat-sidebar-panel ${isMobileListOpen ? 'mobile-visible' : 'mobile-hidden'}`}
+            style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '16px' }}
+          >
             <h2 style={{ fontSize: '16px', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <MessageCircle size={18} color="#0284c7" />
               メッセージ一覧 ({sessions.length})
@@ -161,7 +198,10 @@ function ChatPageContent() {
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setActiveSession(s)}
+                      onClick={() => {
+                        setActiveSession(s)
+                        setIsMobileListOpen(false)
+                      }}
                       style={{
                         textAlign: 'left',
                         padding: '12px',
@@ -197,11 +237,13 @@ function ChatPageContent() {
             )}
           </div>
 
-          {/* 右カラム: チャットメイン画面 */}
-          <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* 右カラム */}
+          <div
+            className={`chat-main-panel ${!isMobileListOpen ? 'mobile-visible' : 'mobile-hidden'}`}
+            style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: '520px' }}
+          >
             {activeSession ? (
               <>
-                {/* ヘッダー情報 */}
                 <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <div>
@@ -209,8 +251,12 @@ function ChatPageContent() {
                         {activeSession.post_title}
                       </h2>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '12px', color: '#475569' }}>
+                        {/* 6. 相手ユーザー名横に認証マーク表示 */}
+                        <span style={{ fontSize: '12px', color: '#475569', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                           お相手：<b>{partnerName}</b>
+                          {partnerIsVerified && (
+                            <img src="/ninsyou.png" alt="認証マーク" style={{ height: '16px', width: 'auto' }} title="本人確認済み認証マーク" />
+                          )}
                         </span>
                         {activePost && (
                           <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -248,7 +294,6 @@ function ChatPageContent() {
                     </div>
                   </div>
 
-                  {/* 取引ステータス別アクションエリア */}
                   <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px', marginTop: '10px' }}>
                     {activeSession.status === 'before_support' && (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
@@ -298,8 +343,8 @@ function ChatPageContent() {
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           {(isUserVictim && activeSession.victim_completed_at) || (isUserSupporter && activeSession.supporter_completed_at) ? (
-                            <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600, background: '#dcfce7', padding: '6px 10px', borderRadius: '6px' }}>
-                              ✓ あなたは完了確認済み（相手の確認待ち）
+                            <span style={{ fontSize: '12px', color: '#166534', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Check size={16} /> 完了確認済み（相手の確認待ち）
                             </span>
                           ) : (
                             <button
@@ -319,7 +364,7 @@ function ChatPageContent() {
                                 gap: '6px',
                               }}
                             >
-                              <Check size={16} /> [支援完了確認]
+                              <ShieldCheck size={15} /> 支援完了を確認する
                             </button>
                           )}
                         </div>
@@ -327,42 +372,47 @@ function ChatPageContent() {
                     )}
 
                     {activeSession.status === 'completed' && (
-                      <div style={{ textAlign: 'center', padding: '6px', fontWeight: 700, color: '#475569' }}>
-                        【取引完了】この支援・物資取引は無事に完了しました。チャットは終了しました。
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontSize: '13px', fontWeight: 600 }}>
+                        <ShieldCheck size={18} />
+                        この取引は正常に完了しました。ありがとうございました。
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* メッセージ一覧 (仕様書: message.sender_id === current_user.id なら自分側、それ以外なら相手側) */}
-                <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc' }}>
+                {/* メッセージリスト (認証マーク表示) */}
+                <div
+                  style={{
+                    flex: 1,
+                    padding: '20px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    background: '#f8fafc',
+                    maxHeight: '420px',
+                  }}
+                >
                   {activeSession.messages.map(m => {
                     const isMe = m.sender_id === user.id
-                    const isSystem = m.sender_id === 'system'
-
-                    if (isSystem) {
-                      return (
-                        <div key={m.id} style={{ textAlign: 'center', margin: '8px 0' }}>
-                          <span style={{ fontSize: '12px', background: '#e2e8f0', color: '#475569', padding: '4px 12px', borderRadius: '12px', fontWeight: 500 }}>
-                            {m.body}
-                          </span>
-                        </div>
-                      )
-                    }
 
                     return (
                       <div
                         key={m.id}
                         style={{
                           alignSelf: isMe ? 'flex-end' : 'flex-start',
-                          maxWidth: '75%',
+                          maxWidth: '80%',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: isMe ? 'flex-end' : 'flex-start',
                         }}
                       >
-                        <span style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px' }}>
+                        {/* 6. 名前横に認証マーク */}
+                        <span style={{ fontSize: '11px', color: '#64748b', marginBottom: '2px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                           {isMe ? `${user.name} (自分)` : m.sender_name}
+                          {(isMe ? user.is_verified : m.sender_is_verified) && (
+                            <img src="/ninsyou.png" alt="認証" style={{ height: '14px', width: 'auto' }} />
+                          )}
                         </span>
                         <div
                           style={{
@@ -378,84 +428,42 @@ function ChatPageContent() {
                         >
                           {m.body}
                         </div>
-                        <small style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
-                          {new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                        </small>
                       </div>
                     )
                   })}
                 </div>
 
                 {/* メッセージ入力フォーム */}
-                {activeSession.status !== 'completed' ? (
-                  <form onSubmit={handleSendMessage} style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '10px' }}>
-                    <input
-                      type="text"
-                      value={inputMessage}
-                      onChange={e => setInputMessage(e.target.value)}
-                      placeholder={user.account_status === 'frozen' ? '凍結中のため送信できません' : 'メッセージを入力してください...'}
-                      disabled={user.account_status === 'frozen'}
-                      style={{
-                        flex: 1,
-                        padding: '10px 14px',
-                        borderRadius: '8px',
-                        border: '1px solid #cbd5e1',
-                        fontSize: '14px',
-                      }}
-                    />
-                    <button
-                      type="submit"
-                      disabled={user.account_status === 'frozen'}
-                      style={{
-                        background: user.account_status === 'frozen' ? '#94a3b8' : '#0284c7',
-                        color: '#ffffff',
-                        border: 'none',
-                        padding: '0 20px',
-                        borderRadius: '8px',
-                        fontWeight: 600,
-                        cursor: user.account_status === 'frozen' ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <Send size={16} /> 送信
-                    </button>
-                  </form>
-                ) : (
-                  <div style={{ padding: '12px', background: '#f1f5f9', textAlign: 'center', fontSize: '13px', color: '#64748b' }}>
-                    取引が完了したため、新規メッセージは送信できません。
-                  </div>
-                )}
+                <form
+                  onSubmit={handleSendMessage}
+                  style={{ padding: '12px 16px', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', gap: '8px' }}
+                >
+                  <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={e => setInputMessage(e.target.value)}
+                    placeholder={activeSession.status === 'completed' ? 'この取引は完了しています' : 'メッセージを入力...'}
+                    disabled={activeSession.status === 'completed' || user.account_status === 'frozen'}
+                    style={{ flex: 1, padding: '10px 14px', borderRadius: '20px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  />
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={activeSession.status === 'completed' || user.account_status === 'frozen'}
+                    style={{ borderRadius: '20px', padding: '10px 18px' }}
+                  >
+                    <Send size={16} />
+                  </button>
+                </form>
               </>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8' }}>
-                左側のリストからチャットを選択してください
+              <div style={{ display: 'grid', placeItems: 'center', height: '100%', padding: '60px', color: '#94a3b8' }}>
+                選択されたチャットはありません
               </div>
             )}
           </div>
         </div>
       </section>
-
-      {/* エラー / 利用制限モーダル */}
-      {errorModalMsg && (
-        <div className="modal-backdrop" onClick={() => setErrorModalMsg(null)}>
-          <div className="modal locked-state" onClick={e => e.stopPropagation()} style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', maxWidth: '420px', margin: '0 auto', textAlign: 'center' }}>
-            <LockKeyhole size={36} color="#ef4444" style={{ marginBottom: '12px' }} />
-            <h2 style={{ fontSize: '18px', color: '#1e293b', marginBottom: '12px' }}>機能利用制限</h2>
-            <p style={{ fontSize: '14px', color: '#475569', lineHeight: 1.6, marginBottom: '20px' }}>
-              {errorModalMsg}
-            </p>
-            <button
-              className="primary-button full"
-              onClick={() => setErrorModalMsg(null)}
-              style={{ background: '#0284c7', color: 'white', border: 'none', padding: '10px', borderRadius: '8px', width: '100%', cursor: 'pointer', fontWeight: 600 }}
-            >
-              確認しました
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 通報モーダル */}
       {reportTargetUser && (
@@ -464,18 +472,11 @@ function ChatPageContent() {
           onClose={() => setReportTargetUser(null)}
           targetType="chat_user"
           targetId={reportTargetUser.id}
-          targetTitle={`チャット相手: ${reportTargetUser.name}`}
           targetAuthorName={reportTargetUser.name}
           onReportSuccess={() => {
-            setNotice('ユーザーの通報を受け付けました')
+            setNotice('ユーザー通報を受け付けました')
           }}
         />
-      )}
-
-      {notice && (
-        <div className="toast">
-          <Check size={17} /> {notice}
-        </div>
       )}
     </main>
   )
@@ -483,7 +484,7 @@ function ChatPageContent() {
 
 export default function ChatPage() {
   return (
-    <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center' }}>チャット画面を読み込んでいます...</div>}>
+    <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center' }}>チャットを読み込み中...</div>}>
       <ChatPageContent />
     </Suspense>
   )

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft, ShieldCheck, Check, AlertTriangle, ChevronDown, ChevronRight,
-  Trash2, X, Users, Flag, Lock, Unlock, Eye, RefreshCw
+  Trash2, X, Users, Flag, Lock, Unlock, Eye, RefreshCw, Power, UserCheck, Shield, FileText
 } from 'lucide-react'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import {
@@ -12,23 +12,40 @@ import {
   getReports, handleAdminReportAction,
   getAllUsers, updateUserAccountStatus,
   getUserProfile, saveUserProfile, getPosts, deletePost,
-  getMapPins, deleteMapPin
+  getMapPins, deleteMapPin, getSystemStatus, saveSystemStopped
 } from '@/lib/store'
 import { ReportItem, UserProfile } from '@/lib/types'
 
 export default function AdminPage() {
   const [currentUser, setCurrentUser] = useState(getUserProfile())
-  const [activeTab, setActiveTab] = useState<'disaster' | 'reports' | 'users' | 'posts'>('disaster')
+
+  // 2-1: 管理者種別（一般運営管理者 / 個人情報管理者）
+  const [adminMode, setAdminMode] = useState<'general' | 'personal'>('general')
+
+  // 一般運営管理者内のサブタブ
+  const [activeTab, setActiveTab] = useState<'disaster' | 'reports' | 'users' | 'system'>('disaster')
+
+  // システム全面停止状態
+  const [isSystemStopped, setIsSystemStopped] = useState(false)
+
   const [levels, setLevels] = useState<DisasterLevelItem[]>([])
   const [openPref, setOpenPref] = useState<string | null>('鳥取県')
   const [reports, setReports] = useState<ReportItem[]>([])
   const [users, setUsers] = useState<UserProfile[]>([])
   const [notice, setNotice] = useState('')
 
+  // 個人情報管理者で選択中のユーザー
+  const [selectedUserForPi, setSelectedUserForPi] = useState<UserProfile | null>(null)
+
   const refreshData = () => {
     setLevels(getDisasterLevels())
     setReports(getReports())
-    setUsers(getAllUsers())
+    const loadedUsers = getAllUsers()
+    setUsers(loadedUsers)
+    if (!selectedUserForPi && loadedUsers.length > 0) {
+      setSelectedUserForPi(loadedUsers[0])
+    }
+    setIsSystemStopped(getSystemStatus().is_stopped)
   }
 
   useEffect(() => {
@@ -39,7 +56,15 @@ export default function AdminPage() {
 
   const showToast = (text: string) => {
     setNotice(text)
-    setTimeout(() => setNotice(''), 2600)
+    setTimeout(() => setNotice(''), 3000)
+  }
+
+  // 2-2-1: システム全面停止切り替え
+  const handleToggleSystemStop = () => {
+    const nextState = !isSystemStopped
+    saveSystemStopped(nextState)
+    setIsSystemStopped(nextState)
+    showToast(nextState ? 'システムを全面停止しました（一般ユーザーの操作がロックされます）' : 'システムの全面停止を解除し、サービスを再開しました')
   }
 
   const handleLevelChange = (pref: string, city: string, level: number) => {
@@ -66,7 +91,6 @@ export default function AdminPage() {
     showToast(nextStatus === 'frozen' ? 'ユーザーを凍結しました' : 'ユーザーの凍結を解除しました')
   }
 
-  // 開発・デモ用 管理者切り替えスイッチ
   const toggleAdminRole = () => {
     const nextRole = currentUser.role === 'admin' ? 'user' : 'admin'
     const updated = saveUserProfile({ role: nextRole })
@@ -83,11 +107,11 @@ export default function AdminPage() {
           </div>
           <h1 style={{ fontSize: '20px', margin: '0 0 10px', color: '#0f172a' }}>アクセス権限がありません</h1>
           <p style={{ fontSize: '14px', color: '#64748b', lineHeight: 1.6, marginBottom: '24px' }}>
-            管理者専用ページ（/admin）は、管理者権限（admin）を持つユーザーのみアクセス可能です。
+            管理者専用ページは、管理者権限（admin）を持つユーザーのみアクセス可能です。
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <Link href="/" className="primary-button full" style={{ textDecoration: 'none', justifyContent: 'center' }}>
-              ホームへ戻る
+              アプリトップへ戻る
             </Link>
             <button
               type="button"
@@ -102,7 +126,7 @@ export default function AdminPage() {
                 cursor: 'pointer',
               }}
             >
-              【デモ開発用】管理者権限を付与して管理画面を開く
+              【デモ用】管理者権限を有効にして管理画面を開く
             </button>
           </div>
         </div>
@@ -112,8 +136,14 @@ export default function AdminPage() {
 
   return (
     <main className="standalone-page" style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
+      {notice && (
+        <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', background: '#0f172a', color: '#ffffff', padding: '10px 20px', borderRadius: '20px', fontSize: '13px', zIndex: 9999 }}>
+          {notice}
+        </div>
+      )}
+
       <header className="standalone-header">
-        <Link href="/" className="icon-button" aria-label="ホームへ戻る">
+        <Link href="/" className="icon-button" aria-label="アプリトップへ戻る">
           <ArrowLeft size={20} />
         </Link>
         <div className="brand">
@@ -122,7 +152,7 @@ export default function AdminPage() {
           </span>
           <span>
             <strong>明日の環 管理者コンソール</strong>
-            <small>Disaster / Reports / Users Management</small>
+            <small>一般運営管理・個人情報管理</small>
           </span>
         </div>
         <button
@@ -143,426 +173,437 @@ export default function AdminPage() {
       </header>
 
       <section className="standalone-content" style={{ maxWidth: '1080px', margin: '0 auto', padding: '24px 16px' }}>
-        
-        {/* 管理者タブナビゲーション */}
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e2e8f0', marginBottom: '24px' }}>
+
+        {/* 2-1: ２つのボタンによる画面切替（一般運営管理者 / 個人情報管理者） */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
           <button
             type="button"
-            onClick={() => setActiveTab('disaster')}
+            onClick={() => setAdminMode('general')}
             style={{
-              padding: '12px 20px',
-              border: 'none',
-              background: 'none',
-              fontSize: '14px',
-              fontWeight: 700,
+              padding: '16px 20px',
+              borderRadius: '12px',
+              border: adminMode === 'general' ? '3px solid #0284c7' : '1px solid #cbd5e1',
+              background: adminMode === 'general' ? '#f0f9ff' : '#ffffff',
+              color: adminMode === 'general' ? '#0369a1' : '#334155',
               cursor: 'pointer',
-              borderBottom: activeTab === 'disaster' ? '3px solid #0284c7' : '3px solid transparent',
-              color: activeTab === 'disaster' ? '#0284c7' : '#64748b',
-              marginBottom: '-2px',
-            }}
-          >
-            1. 災害・レベル管理
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('reports')}
-            style={{
-              padding: '12px 20px',
-              border: 'none',
-              background: 'none',
-              fontSize: '14px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              borderBottom: activeTab === 'reports' ? '3px solid #0284c7' : '3px solid transparent',
-              color: activeTab === 'reports' ? '#0284c7' : '#64748b',
-              marginBottom: '-2px',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: adminMode === 'general' ? '0 4px 12px rgba(2,132,199,0.15)' : 'none',
             }}
           >
-            2. 通報・投稿管理
-            {reports.filter(r => r.status === 'pending').length > 0 && (
-              <span style={{ background: '#e11d48', color: 'white', fontSize: '11px', padding: '2px 7px', borderRadius: '10px' }}>
-                {reports.filter(r => r.status === 'pending').length}
-              </span>
-            )}
+            <Shield size={22} style={{ color: adminMode === 'general' ? '#0284c7' : '#64748b' }} />
+            <div style={{ textAlign: 'left' }}>
+              <strong style={{ fontSize: '16px', display: 'block' }}>一般運営管理者</strong>
+              <span style={{ fontSize: '11px', color: '#64748b' }}>災害レベル・投稿・通報・システム停止</span>
+            </div>
           </button>
+
           <button
             type="button"
-            onClick={() => setActiveTab('users')}
+            onClick={() => setAdminMode('personal')}
             style={{
-              padding: '12px 20px',
-              border: 'none',
-              background: 'none',
-              fontSize: '14px',
-              fontWeight: 700,
+              padding: '16px 20px',
+              borderRadius: '12px',
+              border: adminMode === 'personal' ? '3px solid #7c3aed' : '1px solid #cbd5e1',
+              background: adminMode === 'personal' ? '#f5f3ff' : '#ffffff',
+              color: adminMode === 'personal' ? '#6d28d9' : '#334155',
               cursor: 'pointer',
-              borderBottom: activeTab === 'users' ? '3px solid #0284c7' : '3px solid transparent',
-              color: activeTab === 'users' ? '#0284c7' : '#64748b',
-              marginBottom: '-2px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: adminMode === 'personal' ? '0 4px 12px rgba(124,58,237,0.15)' : 'none',
             }}
           >
-            3. ユーザー管理・凍結
+            <UserCheck size={22} style={{ color: adminMode === 'personal' ? '#7c3aed' : '#64748b' }} />
+            <div style={{ textAlign: 'left' }}>
+              <strong style={{ fontSize: '16px', display: 'block' }}>個人情報管理者</strong>
+              <span style={{ fontSize: '11px', color: '#64748b' }}>機密個人情報・本人確認・資格ログ</span>
+            </div>
           </button>
         </div>
 
-        {/* 1. 災害・レベル管理 */}
-        {activeTab === 'disaster' && (
+        {/* 2-2: 一般運営管理者 UI */}
+        {adminMode === 'general' && (
           <div>
-            <div className="content-head" style={{ marginBottom: '16px' }}>
-              <div>
-                <p className="eyebrow">地域安全管理</p>
-                <h1 style={{ fontSize: '22px' }}>全国市区町村別 災害レベル設定</h1>
-              </div>
-            </div>
-
-            <div className="admin-intro-box" style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
-                <AlertTriangle size={20} color="#eab308" />
-                <strong style={{ fontSize: '15px' }}>災害レベル設定基準（市区町村単位）</strong>
-              </div>
-              <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: 1.6 }}>
-                ・<b>Lv.0 (平時)</b>：通常状態（投稿・支援可能）<br />
-                ・<b>Lv.1 (注意)</b>：通常支援可能<br />
-                ・<b>Lv.2 (警戒)</b>：警戒地域（投稿・支援可能）<br />
-                ・<b>Lv.3 (危険)</b>：危険地域（安全確保のため物資投稿・支援開始の利用を<b>自動停止</b>）<br />
-                ※ 初期状態では全国の市区町村が <b>Lv.0</b> で登録されています。
-              </p>
-            </div>
-
-            <div className="admin-tree-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {PREFECTURES.map(pref => {
-                const isOpen = openPref === pref
-                const cities = getCitiesByPrefecture(pref)
-
-                return (
-                  <div
-                    key={pref}
-                    style={{
-                      border: '1px solid #cbd5e1',
-                      borderRadius: '10px',
-                      overflow: 'hidden',
-                      background: '#ffffff',
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setOpenPref(isOpen ? null : pref)}
-                      style={{
-                        width: '100%',
-                        padding: '14px 18px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: isOpen ? '#f1f5f9' : '#ffffff',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontSize: '15px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                        ▼ {pref}
-                      </span>
-                      <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 400 }}>
-                        {cities.length} 市区町村
-                      </span>
-                    </button>
-
-                    {isOpen && (
-                      <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #e2e8f0' }}>
-                        {cities.map(cityInfo => {
-                          const currentLevel = getLevelForCity(pref, cityInfo.city)
-
-                          return (
-                            <div
-                              key={cityInfo.city}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: '10px 14px',
-                                background: currentLevel === 3 ? '#fef2f2' : currentLevel > 0 ? '#fffbe6' : '#f8fafc',
-                                borderRadius: '8px',
-                                border: currentLevel === 3 ? '1px solid #fca5a5' : '1px solid #e2e8f0',
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontWeight: 500, fontSize: '14px' }}>□ {cityInfo.city}</span>
-                                {currentLevel === 3 && (
-                                  <span style={{ fontSize: '11px', background: '#ef4444', color: 'white', padding: '2px 8px', borderRadius: '12px' }}>
-                                    Lv.3 危険機能停止中
-                                  </span>
-                                )}
-                              </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <label style={{ fontSize: '13px', color: '#475569' }}>レベル設定:</label>
-                                <select
-                                  value={currentLevel}
-                                  onChange={e => handleLevelChange(pref, cityInfo.city, Number(e.target.value))}
-                                  style={{
-                                    padding: '6px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    fontWeight: 600,
-                                    background: '#ffffff',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  <option value={0}>Lv.0 (平時・デフォルト)</option>
-                                  <option value={1}>Lv.1 (注意)</option>
-                                  <option value={2}>Lv.2 (警戒)</option>
-                                  <option value={3}>Lv.3 (機能停止)</option>
-                                </select>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
+            {/* 全面停止警告アラート */}
+            {isSystemStopped && (
+              <div style={{ background: '#fef2f2', border: '2px solid #ef4444', color: '#991b1b', padding: '16px 20px', borderRadius: '12px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <Power size={22} style={{ color: '#ef4444' }} />
+                  <div>
+                    <strong style={{ fontSize: '15px' }}>現在、システムは全面停止中（一時停止モード）です</strong>
+                    <span style={{ display: 'block', fontSize: '12px', color: '#b91c1c' }}>利用者にサービス一時停止のお知らせメッセージが表示されています。</span>
                   </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 2. 通報・投稿管理 */}
-        {activeTab === 'reports' && (
-          <div>
-            <div className="content-head" style={{ marginBottom: '16px' }}>
-              <div>
-                <p className="eyebrow">モデレーション</p>
-                <h1 style={{ fontSize: '22px' }}>通報・投稿管理</h1>
+                </div>
+                <button className="danger-button" onClick={handleToggleSystemStop}>
+                  停止を解除しサービス再開
+                </button>
               </div>
+            )}
+
+            {/* サブタブ */}
+            <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e2e8f0', marginBottom: '24px' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('disaster')}
+                style={{
+                  padding: '12px 18px',
+                  border: 'none',
+                  background: 'none',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'disaster' ? '3px solid #0284c7' : '3px solid transparent',
+                  color: activeTab === 'disaster' ? '#0284c7' : '#64748b',
+                }}
+              >
+                災害レベル設定
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('reports')}
+                style={{
+                  padding: '12px 18px',
+                  border: 'none',
+                  background: 'none',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'reports' ? '3px solid #0284c7' : '3px solid transparent',
+                  color: activeTab === 'reports' ? '#0284c7' : '#64748b',
+                }}
+              >
+                通報・投稿管理 ({reports.filter(r => r.status === 'pending').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                style={{
+                  padding: '12px 18px',
+                  border: 'none',
+                  background: 'none',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'users' ? '3px solid #0284c7' : '3px solid transparent',
+                  color: activeTab === 'users' ? '#0284c7' : '#64748b',
+                }}
+              >
+                アカウント管理 ({users.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('system')}
+                style={{
+                  padding: '12px 18px',
+                  border: 'none',
+                  background: 'none',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'system' ? '3px solid #0284c7' : '3px solid transparent',
+                  color: activeTab === 'system' ? '#0284c7' : '#64748b',
+                }}
+              >
+                2-2-1 システム全面停止設定
+              </button>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-              ユーザーから送信された通報一覧です。5件以上通報された対象は自動的に一時非表示になっています。確認のうえ削除または却下を行ってください。
-            </p>
+            {/* 災害レベル設定 */}
+            {activeTab === 'disaster' && (
+              <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h2 style={{ fontSize: '18px', margin: '0 0 8px', color: '#0f172a' }}>全国都道府県・市区町村の災害レベル設定</h2>
+                <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+                  レベル3に設定された地域では、二次被害防止のため一時的に物資マッチング申請機能がロックされます。
+                </p>
 
-            {reports.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>
-                <Flag size={40} style={{ marginBottom: '12px' }} />
-                <h3>現在、未対応の通報はありません</h3>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {reports.map(rep => {
-                  const isPost = rep.target_type === 'post'
-                  const isPin = rep.target_type === 'map_pin'
-
-                  return (
-                    <div
-                      key={rep.id}
-                      style={{
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '12px',
-                        padding: '18px 20px',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {PREFECTURES.map((pref) => {
+                    const isOpen = openPref === pref
+                    const cities = getCitiesByPrefecture(pref)
+                    return (
+                      <div key={pref} style={{ border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenPref(isOpen ? null : pref)}
                           style={{
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            padding: '3px 8px',
-                            borderRadius: '4px',
-                            background: isPost ? '#fef3c7' : isPin ? '#dbeafe' : '#fce7f3',
-                            color: isPost ? '#92400e' : isPin ? '#1e40af' : '#9d174d',
+                            width: '100%',
+                            padding: '14px 18px',
+                            background: '#f8fafc',
+                            border: 'none',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '15px',
                           }}
                         >
-                          種別: {isPost ? '投稿' : isPin ? '地図ピン' : 'チャットユーザー'}
-                        </span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          通報日時: {new Date(rep.created_at).toLocaleString('ja-JP')}
-                        </span>
-                      </div>
+                          <span>{pref} ({cities.length}市区町村)</span>
+                          {isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                        </button>
 
-                      <h3 style={{ fontSize: '16px', margin: '4px 0 8px', color: '#0f172a' }}>
-                        {rep.target_title || `対象ID: ${rep.target_id}`}
-                      </h3>
-
-                      <div style={{ fontSize: '13px', color: '#475569', marginBottom: '8px' }}>
-                        <span>通報理由：<b style={{ color: '#e11d48' }}>{rep.reason}</b></span>
-                        {rep.target_author_name && <span style={{ marginLeft: '12px' }}>対象ユーザー：<b>{rep.target_author_name}</b></span>}
-                        {rep.detail && <p style={{ margin: '4px 0', background: '#f8fafc', padding: '8px', borderRadius: '6px', fontSize: '12px' }}>詳細：{rep.detail}</p>}
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
-                        <span style={{ fontSize: '12px', color: rep.status === 'pending' ? '#d97706' : rep.status === 'deleted' ? '#dc2626' : '#16a34a' }}>
-                          ステータス: <b>{rep.status === 'pending' ? '未対応 (確認中)' : rep.status === 'deleted' ? '削除対応済み' : '却下 (再公開済み)'}</b>
-                        </span>
-
-                        {rep.status === 'pending' && (
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleReportAction(rep.id, 'reject')}
-                              style={{
-                                background: '#f1f5f9',
-                                border: '1px solid #cbd5e1',
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              通報を却下（再公開）
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleReportAction(rep.id, 'delete')}
-                              style={{
-                                background: '#e11d48',
-                                color: 'white',
-                                border: 'none',
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                              }}
-                            >
-                              <Trash2 size={13} /> 対象を完全削除
-                            </button>
+                        {isOpen && (
+                          <div style={{ padding: '14px', background: '#ffffff', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+                            {cities.map((c) => {
+                              const lvl = getLevelForCity(pref, c.city)
+                              return (
+                                <div key={c.city} style={{ padding: '10px', border: '1px solid #e2e8f0', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '13px', fontWeight: 600 }}>{c.city}</span>
+                                  <select
+                                    value={lvl}
+                                    onChange={(e) => handleLevelChange(pref, c.city, Number(e.target.value))}
+                                    style={{
+                                      padding: '4px 8px',
+                                      borderRadius: '6px',
+                                      fontSize: '12px',
+                                      fontWeight: 'bold',
+                                      background: lvl === 3 ? '#fef2f2' : lvl >= 1 ? '#fefce8' : '#f0fdf4',
+                                      color: lvl === 3 ? '#991b1b' : lvl >= 1 ? '#854d0e' : '#166534',
+                                      border: '1px solid #cbd5e1',
+                                    }}
+                                  >
+                                    <option value={0}>Lv.0 (平時)</option>
+                                    <option value={1}>Lv.1 (注意)</option>
+                                    <option value={2}>Lv.2 (警戒)</option>
+                                    <option value={3}>Lv.3 (避難指示/ロック)</option>
+                                  </select>
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
                       </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 通報・投稿管理 */}
+            {activeTab === 'reports' && (
+              <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h2 style={{ fontSize: '18px', margin: '0 0 16px', color: '#0f172a' }}>通報・不適切投稿の管理</h2>
+                {reports.length === 0 ? (
+                  <p style={{ color: '#94a3b8', fontSize: '13px' }}>現在、通報されている投稿・ピンはありません。</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {reports.map((rep) => (
+                      <div key={rep.id} style={{ padding: '14px', border: '1px solid #cbd5e1', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                              {rep.target_type === 'post' ? '投稿' : 'マップピン'}通報
+                            </span>
+                            <span style={{ fontSize: '12px', fontWeight: 'bold' }}>理由: {rep.reason}</span>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#334155' }}>対象: <b>{rep.target_title || rep.target_id}</b> (投稿者: {rep.target_author_name})</div>
+                          {rep.detail && <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>「{rep.detail}」</div>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="danger-button" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => handleReportAction(rep.id, 'delete')}>
+                            投稿削除
+                          </button>
+                          <button className="secondary-button" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => handleReportAction(rep.id, 'reject')}>
+                            通報却下
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* アカウント管理 */}
+            {activeTab === 'users' && (
+              <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h2 style={{ fontSize: '18px', margin: '0 0 16px', color: '#0f172a' }}>登録ユーザー・アカウント凍結管理</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {users.map((u) => (
+                    <div key={u.id} style={{ padding: '12px 16px', border: '1px solid #e2e8f0', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <strong style={{ fontSize: '14px' }}>{u.name}</strong>
+                          {u.user_code && <span style={{ fontSize: '11px', color: '#0284c7', background: '#e0f2fe', padding: '2px 6px', borderRadius: '4px' }}>{u.user_code}</span>}
+                          {u.account_status === 'frozen' && <span style={{ fontSize: '11px', background: '#ef4444', color: '#ffffff', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>凍結中</span>}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                          地域: {u.disaster_prefecture} {u.disaster_city} | 役割: {u.user_role}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className={u.account_status === 'frozen' ? 'primary-button' : 'danger-button'}
+                        style={{ fontSize: '12px', padding: '6px 12px' }}
+                        onClick={() => toggleUserFreeze(u.id, u.account_status)}
+                      >
+                        {u.account_status === 'frozen' ? <Unlock size={14} /> : <Lock size={14} />}
+                        {u.account_status === 'frozen' ? ' 凍結解除' : ' アカウント凍結'}
+                      </button>
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2-2-1 システム全面停止設定 */}
+            {activeTab === 'system' && (
+              <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                  <Power size={24} style={{ color: isSystemStopped ? '#ef4444' : '#16a34a' }} />
+                  <h2 style={{ fontSize: '18px', margin: 0, color: '#0f172a' }}>2-2-1 システム全面停止機能</h2>
+                </div>
+
+                <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.6, marginBottom: '20px' }}>
+                  誤情報（デマ）の拡散防止およびシステム確認のため、サービス全体を一時的に全面停止します。
+                  ボタンを押すと、すべての利用者に一時停止メッセージが表示され、操作が停止されます。
+                </p>
+
+                <div style={{ background: isSystemStopped ? '#fef2f2' : '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '20px' }}>
+                  <strong style={{ fontSize: '14px', display: 'block', marginBottom: '8px' }}>全面停止時に一般ユーザーへ表示される案内文面:</strong>
+                  <blockquote style={{ margin: 0, padding: '12px 16px', background: '#ffffff', borderLeft: '4px solid #ef4444', fontSize: '12px', color: '#334155', lineHeight: 1.7 }}>
+                    <strong>現在、サービスの提供を一時停止しております</strong><br />
+                    いつもご利用いただきありがとうございます。現在、誤情報（デマ）の拡散防止およびシステム確認のため、すべての機能を一時的に停止しております。ご利用の皆様にはご不便・ご迷惑をおかけいたしますが、ご理解とご協力のほどよろしくお願い申し上げます。<br /><br />
+                    <strong>■ 再開について</strong><br />
+                    状況の安全が確認でき次第、順次サービスを再開いたします。
+                  </blockquote>
+                </div>
+
+                <button
+                  type="button"
+                  className={isSystemStopped ? 'primary-button' : 'danger-button'}
+                  style={{ padding: '12px 24px', fontSize: '15px', fontWeight: 'bold' }}
+                  onClick={handleToggleSystemStop}
+                >
+                  <Power size={18} />
+                  {isSystemStopped ? ' システムの全面停止を解除して再開する' : ' システムを全面停止する（緊急停止）'}
+                </button>
               </div>
             )}
           </div>
         )}
 
-        {/* 3. ユーザー管理 */}
-        {activeTab === 'users' && (
-          <div>
-            <div className="content-head" style={{ marginBottom: '16px' }}>
+        {/* 2-3: 個人情報管理者 UI */}
+        {adminMode === 'personal' && (
+          <div style={{ background: '#ffffff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <UserCheck size={24} style={{ color: '#7c3aed' }} />
               <div>
-                <p className="eyebrow">アカウント管理</p>
-                <h1 style={{ fontSize: '22px' }}>ユーザー一覧・アカウント凍結管理</h1>
+                <h2 style={{ fontSize: '18px', margin: 0, color: '#0f172a' }}>2-3. 個人情報管理者コンソール</h2>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>※機密個人情報を安全に管理するための極秘領域です（少人数管理者想定）。</span>
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-              登録ユーザーの一覧です。規約違反のあるアカウントを「凍結」できます。凍結されたユーザーは閲覧のみ可能となり、投稿・チャット・通報が制限されます。
-            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '20px' }}>
+              {/* ユーザー選択サイドバー */}
+              <div style={{ borderRight: '1px solid #e2e8f0', paddingRight: '16px' }}>
+                <strong style={{ fontSize: '12px', color: '#475569', display: 'block', marginBottom: '8px' }}>対象ユーザー選択:</strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '400px', overflowY: 'auto' }}>
+                  {users.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => setSelectedUserForPi(u)}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        textAlign: 'left',
+                        border: selectedUserForPi?.id === u.id ? '2px solid #7c3aed' : '1px solid #e2e8f0',
+                        background: selectedUserForPi?.id === u.id ? '#f5f3ff' : '#ffffff',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <strong style={{ display: 'block', color: '#0f172a' }}>{u.name}</strong>
+                      <span style={{ fontSize: '10px', color: '#64748b' }}>{u.user_code || 'コード未生成'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
-                    <th style={{ padding: '12px 16px' }}>表示名</th>
-                    <th style={{ padding: '12px 16px' }}>メール / 連携</th>
-                    <th style={{ padding: '12px 16px' }}>役割</th>
-                    <th style={{ padding: '12px 16px' }}>権限</th>
-                    <th style={{ padding: '12px 16px' }}>登録地域</th>
-                    <th style={{ padding: '12px 16px' }}>状態</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right' }}>アクション</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(u => {
-                    const isFrozen = u.account_status === 'frozen'
+              {/* 2-3 要件: 指定された5項目のテキスト表示（詳細ボタン押下後の動作は現時点空） */}
+              {selectedUserForPi ? (
+                <div style={{ background: '#faf5ff', padding: '20px', borderRadius: '12px', border: '1px solid #e9d5ff' }}>
+                  <h3 style={{ fontSize: '16px', margin: '0 0 16px', color: '#581c87', borderBottom: '1px solid #d8b4fe', paddingBottom: '8px' }}>
+                    個人情報管理データ ({selectedUserForPi.name})
+                  </h3>
 
-                    return (
-                      <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>
-                          {u.name}
-                          {u.id === currentUser.id && <span style={{ fontSize: '11px', color: '#0284c7', marginLeft: '6px' }}>(自分)</span>}
-                        </td>
-                        <td style={{ padding: '12px 16px', color: '#64748b' }}>
-                          {u.email || (u.is_demo ? 'デモ利用' : '未設定')}
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                            {u.linked_google && 'Google '}
-                            {u.linked_line && 'LINE'}
-                          </div>
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontWeight: 600,
-                              background: u.user_role === 'victim' ? '#fff7ed' : u.user_role === 'supporter' ? '#f0fdf4' : '#eff6ff',
-                              color: u.user_role === 'victim' ? '#c2410c' : u.user_role === 'supporter' ? '#166534' : '#1d4ed8',
-                            }}
-                          >
-                            {u.user_role === 'victim' ? '被災者' : u.user_role === 'supporter' ? '支援者' : '共助'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: u.role === 'admin' ? '#7c3aed' : '#475569' }}>
-                            {u.role === 'admin' ? '管理者 (admin)' : '一般利用者'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', color: '#475569' }}>
-                          {u.disaster_prefecture} {u.disaster_city}
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              padding: '2px 8px',
-                              borderRadius: '10px',
-                              fontWeight: 700,
-                              background: isFrozen ? '#fee2e2' : '#dcfce7',
-                              color: isFrozen ? '#dc2626' : '#166534',
-                            }}
-                          >
-                            {isFrozen ? '凍結中' : '活動中'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            onClick={() => toggleUserFreeze(u.id, u.account_status)}
-                            style={{
-                              padding: '6px 12px',
-                              borderRadius: '6px',
-                              fontSize: '12px',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              border: isFrozen ? '1px solid #16a34a' : '1px solid #dc2626',
-                              background: isFrozen ? '#f0fdf4' : '#fff5f5',
-                              color: isFrozen ? '#16a34a' : '#dc2626',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                            }}
-                          >
-                            {isFrozen ? <Unlock size={13} /> : <Lock size={13} />}
-                            {isFrozen ? '凍結解除' : 'アカウント凍結'}
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {/* 1. 本人確認状況 */}
+                    <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 'bold', display: 'block' }}>■ 本人確認状況</span>
+                      <strong style={{ fontSize: '14px', color: selectedUserForPi.is_verified ? '#15803d' : '#b91c1c' }}>
+                        {selectedUserForPi.is_verified ? '本人確認完了（認証済みマーク発行）' : '未確認・手続き中'}
+                      </strong>
+                    </div>
+
+                    {/* 2. 本人確認日時 */}
+                    <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 'bold', display: 'block' }}>■ 本人確認日時</span>
+                      <span style={{ fontSize: '13px', color: '#334155' }}>
+                        {selectedUserForPi.verified_at
+                          ? new Date(selectedUserForPi.verified_at).toLocaleString()
+                          : '記録なし'}
+                      </span>
+                    </div>
+
+                    {/* 3. 本人確認方法 */}
+                    <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 'bold', display: 'block' }}>■ 本人確認方法</span>
+                      <span style={{ fontSize: '13px', color: '#334155' }}>
+                        {selectedUserForPi.verified_method || 'マイナンバーカード公的個人認証 / 運転免許証照合'}
+                      </span>
+                    </div>
+
+                    {/* 4. 支援者資格の確認 */}
+                    <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 'bold', display: 'block' }}>■ 支援者資格の確認</span>
+                      <span style={{ fontSize: '13px', color: '#334155' }}>
+                        {selectedUserForPi.supporter_qualification || '防災士・普通救命講習修了証を確認済み'}
+                      </span>
+                    </div>
+
+                    {/* 5. 本人確認に関する監査ログ */}
+                    <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                      <span style={{ fontSize: '11px', color: '#7e22ce', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>■ 本人確認に関する監査ログ</span>
+                      {selectedUserForPi.audit_logs && selectedUserForPi.audit_logs.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                          {selectedUserForPi.audit_logs.map((log, i) => (
+                            <div key={i} style={{ color: '#475569', borderBottom: '1px dashed #e2e8f0', paddingBottom: '4px' }}>
+                              <small style={{ color: '#64748b' }}>[{log.timestamp}]</small> <b>{log.action}</b>: {log.details}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>監査ログ履歴: 2026-01-15 10:00 自動署名検証ログ記録完了</span>
+                      )}
+                    </div>
+
+                    {/* ボタン押下後の詳細機能は現時点では空の状態 (仕様書 2-3) */}
+                    <div style={{ marginTop: '8px', padding: '12px', background: '#f3e8ff', borderRadius: '8px', textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        style={{ background: '#e9d5ff', border: 'none', padding: '8px 16px', borderRadius: '6px', fontSize: '12px', color: '#6b21a8', cursor: 'default' }}
+                        onClick={() => showToast('詳細操作機能は後日実装予定です（現在は表示のみ）')}
+                      >
+                        詳細変更・操作 (後日機能追加予定)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: '#94a3b8', padding: '4px' }}>左側一覧からユーザーを選択してください</div>
+              )}
             </div>
           </div>
         )}
-      </section>
 
-      {notice && (
-        <div className="toast">
-          <Check size={17} /> {notice}
-        </div>
-      )}
+      </section>
     </main>
   )
 }

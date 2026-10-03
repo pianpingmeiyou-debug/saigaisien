@@ -42,7 +42,7 @@ export default function DeclarationPage() {
     <main className="auth-page">
       <section className="auth-card declaration-card">
         <Link href="/" className="text-button" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '16px' }}>
-          <ArrowLeft size={16} /> ホームへ戻る
+          <ArrowLeft size={16} /> アプリトップへ戻る
         </Link>
         <p className="eyebrow">明日の環</p>
         <h1>現在の状況・地域設定</h1>

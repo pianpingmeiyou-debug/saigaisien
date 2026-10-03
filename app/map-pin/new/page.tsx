@@ -107,18 +107,18 @@ function NewMapPinPageContent() {
   }
 
   return (
-    <main className="pin-entry-page">
-      <header className="pin-entry-header">
+    <main className="pin-entry-page" style={{ maxWidth: '680px', margin: '0 auto', padding: '24px 16px' }}>
+      <header className="pin-entry-header" style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button type="button" className="icon-button" aria-label="地図に戻る" onClick={() => router.back()}>
           <ArrowLeft size={20} />
         </button>
         <div>
-          <p className="eyebrow">地図投稿</p>
-          <h1>ピン情報を入力</h1>
+          <p className="eyebrow" style={{ fontSize: '12px', color: '#0284c7', margin: 0, fontWeight: 'bold' }}>地図投稿</p>
+          <h1 style={{ fontSize: '20px', margin: 0, color: '#0f172a' }}>ピン情報を入力</h1>
         </div>
       </header>
 
-      <section className="pin-entry-card" aria-labelledby="pin-entry-title">
+      <section className="pin-entry-card" aria-labelledby="pin-entry-title" style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
         <div className="pin-location-summary">
           <span className="pin-location-icon">
             <MapPin size={19} />
