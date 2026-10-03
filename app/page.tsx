@@ -671,26 +671,25 @@ export default function Page() {
 
       {/* フッター：ページ切り替えタブ */}
       {/* 3-1: ページ切り替えタブ (PCで文字切れを防ぎ横スクロール対応) */}
-      <footer
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
-          background: '#ffffff',
-          borderTop: '1px solid #e2e8f0',
-          boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.05)',
-        }}
+      <footer style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        background: '#ffffff',
+        borderTop: '1px solid #e2e8f0',
+        boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.05)',
+      }}
       >
         <nav
           style={{
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            gap: '8px',
+            gap: '2px',
             width: '100%',
-            padding: '8px 12px',
+            padding: '8px 6px',
             boxSizing: 'border-box',
             overflowX: 'auto',
           }}
@@ -701,7 +700,7 @@ export default function Page() {
               type="button"
               onClick={() => selectTab(t)}
               style={{
-                padding: '8px 16px',
+                padding: '8px 8px',
                 borderRadius: '8px',
                 border: 'none',
                 background: tab === t ? '#e0f2fe' : 'transparent',
@@ -713,7 +712,7 @@ export default function Page() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '6px',
+                gap: '4px',
                 flexShrink: 0,
               }}
             >

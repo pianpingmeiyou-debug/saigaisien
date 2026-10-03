@@ -617,7 +617,13 @@ export default function AccountPage() {
             </div>
 
             {/* 顔写真 demo.png */}
-            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                marginBottom: '16px'
+              }}
+            >
               <img
                 src="/demo.png"
                 alt="会員顔写真"
