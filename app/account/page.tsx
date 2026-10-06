@@ -6,11 +6,11 @@ import { useEffect, useState } from 'react'
 import {
   UserRound, MapPin, HeartHandshake, ShieldCheck, FileText,
   Trash2, Edit3, Check, AlertTriangle, ArrowLeft, Plus, LogIn,
-  KeyRound, HelpCircle, X, ShieldAlert, Sparkles, Navigation
+  HelpCircle, X, ShieldAlert, Sparkles, Navigation
 } from 'lucide-react'
 import {
   getUserProfile, saveUserProfile, getMyPosts, deletePost,
-  updatePost, getCityDisasterLevel, setDemoUserMode, setAdminUserMode, loginWithUserCode
+  updatePost, getCityDisasterLevel, setDemoUserMode, setAdminUserMode
 } from '@/lib/store'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import { UserRole, PostItem, PostCategory } from '@/lib/types'
@@ -22,9 +22,6 @@ export default function AccountPage() {
   const [myPosts, setMyPosts] = useState<PostItem[]>([])
   const [editingPost, setEditingPost] = useState<PostItem | null>(null)
   const [notice, setNotice] = useState('')
-
-  // ユーザーコードログイン用入力
-  const [inputUserCode, setInputUserCode] = useState('')
 
   // 会員証モーダル表示フラグ
   const [showCardModal, setShowCardModal] = useState(false)
@@ -98,23 +95,6 @@ export default function AccountPage() {
     setTimeout(() => {
       router.push('/admin')
     }, 600)
-  }
-
-  // ユーザーコードログインハンドラ
-  const handleUserCodeLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    const res = loginWithUserCode(inputUserCode)
-    if (res.success && res.user) {
-      setUser(res.user)
-      setDisplayName(res.user.name)
-      setUserRole(res.user.user_role)
-      setSelectedPref(res.user.disaster_prefecture || '鳥取県')
-      setSelectedCity(res.user.disaster_city || '米子市')
-      setInputUserCode('')
-      showToast(`ユーザーコード (${res.user.user_code}) でログインしました`)
-    } else {
-      showToast(res.error || 'ログインに失敗しました')
-    }
   }
 
   const handleDeletePost = (postId: string) => {
@@ -249,28 +229,6 @@ export default function AccountPage() {
       )}
 
       <section className="standalone-content" style={{ maxWidth: '780px', margin: '0 auto', padding: '24px 16px' }}>
-
-        {/* 1-1-1: ユーザーコードログインバー */}
-        <div style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
-          <form onSubmit={handleUserCodeLogin} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <KeyRound size={18} style={{ color: '#0284c7' }} />
-            <div style={{ flex: 1, minWidth: '200px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', color: '#334155' }}>
-                ユーザーコードを入力してログイン
-              </label>
-              <input
-                type="text"
-                placeholder="例: ASU-8829-X39"
-                value={inputUserCode}
-                onChange={(e) => setInputUserCode(e.target.value)}
-                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', marginTop: '4px' }}
-              />
-            </div>
-            <button type="submit" className="primary-button" style={{ padding: '8px 16px', fontSize: '13px' }}>
-              ログイン
-            </button>
-          </form>
-        </div>
 
         {/* 7-1, 8-1: デジタル会員証エリア (明るい青系背景・ユーザーコード表示は基本プロフィール設定内に移動) */}
         <div style={{ background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)', color: '#ffffff', padding: '20px 24px', borderRadius: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', boxShadow: '0 4px 14px rgba(2, 132, 199, 0.25)' }}>

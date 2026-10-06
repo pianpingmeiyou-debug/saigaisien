@@ -448,8 +448,8 @@ export default function Page() {
                     <div
                       key={post.id}
                       style={{
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
+                        background: post.type === 'request' ? '#fff5f5' : '#f2f8ff',
+                        border: post.type === 'request' ? '1px solid #fecaca' : '1px solid #bfdbfe',
                         borderRadius: '14px',
                         padding: '18px',
                         display: 'flex',
@@ -473,12 +473,16 @@ export default function Page() {
                             {post.type === 'request' ? '支援依頼' : '支援提供'} [{post.categories && post.categories.length > 0 ? post.categories.join('・') : post.category}]
                           </span>
 
-                          {/* 8. 12時間以内表示 */}
-                          {is12h && (
-                            <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold', background: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
-                              🟢 12時間以内
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <span style={{ fontSize: '11px', color: post.urgency === '高' ? '#b91c1c' : post.urgency === '中' ? '#a16207' : '#166534', fontWeight: 700, background: post.urgency === '高' ? '#fee2e2' : post.urgency === '中' ? '#fef3c7' : '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
+                              {post.urgency === '高' ? '▲' : post.urgency === '中' ? '●' : '▽'} 緊急度 {post.urgency}
                             </span>
-                          )}
+                            {is12h && (
+                              <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold', background: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
+                                12時間以内
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* タイトル削除仕様のため説明を重視表示 */}
