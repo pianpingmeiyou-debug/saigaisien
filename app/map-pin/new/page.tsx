@@ -33,7 +33,7 @@ function NewMapPinPageContent() {
   const [photoFileName, setPhotoFileName] = useState('')
   const [error, setError] = useState('')
 
-  // 2.5MB以下のPNG/JPG/JPEGのみ受け付ける
+  // 1投稿1枚、2MB以下のPNG/JPG/JPEGのみ受け付ける
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -45,10 +45,10 @@ function NewMapPinPageContent() {
       return
     }
 
-    // サイズチェック: 2.5MB以下 (2.5 * 1024 * 1024 bytes)
-    const MAX_SIZE = 2.5 * 1024 * 1024
+    // サイズチェック: 2MB以下 (2 * 1024 * 1024 bytes)
+    const MAX_SIZE = 2 * 1024 * 1024
     if (file.size > MAX_SIZE) {
-      setError('画像サイズは最大2.5MBまでです')
+      setError('画像サイズは最大2MBまでです')
       return
     }
 
@@ -118,7 +118,7 @@ function NewMapPinPageContent() {
         </div>
       </header>
 
-      <section className="pin-entry-card" aria-labelledby="pin-entry-title" style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+      <section className="pin-entry-card" aria-labelledby="pin-entry-title" style={{ background: '#ffffff', padding: 'clamp(20px, 4vw, 28px)', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
         <div className="pin-location-summary">
           <span className="pin-location-icon">
             <MapPin size={19} />
@@ -170,7 +170,7 @@ function NewMapPinPageContent() {
           {/* 画像アップロード */}
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
-              写真の添付（1枚 / 最大2.5MB / PNG・JPG・JPEG）
+              写真の添付（1枚 / 最大2MB / PNG・JPG・JPEG）
             </label>
             {!photoDataUrl ? (
               <label
@@ -188,7 +188,13 @@ function NewMapPinPageContent() {
               >
                 <Camera size={20} color="#0284c7" />
                 <span style={{ fontSize: '13px', color: '#334155' }}>写真を選択またはカメラで撮影</span>
-                <input type="file" accept="image/png, image/jpeg, image/jpg" onChange={handleImageChange} style={{ display: 'none' }} />
+                <input
+                  type="file"
+                  accept="image/png, image/jpeg, image/jpg"
+                  capture="environment"
+                  onChange={handleImageChange}
+                  style={{ display: 'none' }}
+                />
               </label>
             ) : (
               <div style={{ position: 'relative', display: 'inline-block', marginTop: '6px' }}>
