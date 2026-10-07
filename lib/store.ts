@@ -51,12 +51,61 @@ export function isWithin12Hours(dateStr: string): boolean {
   return diffHours >= 0 && diffHours <= 12
 }
 
-// ユーザーコード生成
-export function generateUserCode(): string {
-  const rand = Math.floor(1000 + Math.random() * 9000)
-  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-  const char = letters[Math.floor(Math.random() * letters.length)]
-  return `ASU-${rand}-${char}`
+const LAUNCHED_KEY = 'has_launched'
+
+const SEARCH_SYNONYM_GROUPS: string[][] = [
+  ['水', 'みず', 'ミズ', '飲料水', 'ペットボトル', 'ミネラルウォーター', 'ウォーター'],
+  ['充電器', 'バッテリー', 'モバ充', 'モバイルバッテリー', '充電', 'ポータブル電源'],
+  ['食料', '食べ物', '食品', 'ごはん', 'ご飯', '食事', '保存食', 'カンパン'],
+  ['衣類', '服', '衣服', '洋服', '防寒着'],
+  ['医薬品', '薬', 'おくすり', '常備薬'],
+  ['自家用車', 'くるま', '車', '自動車', 'マイカー', '乗用車', '車移動'],
+  ['毛布', '布団', 'ふとん', '寒い', '防寒', '寝具'],
+]
+
+export function expandSearchTerms(query: string): string[] {
+  const terms = query.split(/[、,\s]+/).map(t => t.trim()).filter(Boolean)
+  const expanded = new Set<string>()
+  for (const term of terms) {
+    expanded.add(term)
+    const lower = term.toLowerCase()
+    for (const group of SEARCH_SYNONYM_GROUPS) {
+      if (group.some(item => item.toLowerCase() === lower || item.includes(term) || term.includes(item))) {
+        group.forEach(item => expanded.add(item))
+      }
+    }
+  }
+  const result = [...expanded]
+  if (process.env.NODE_ENV !== 'production' && terms.length > 0) {
+    console.log('[AI Search Debug]', {
+      query,
+      inputTerms: terms,
+      expandedTerms: result,
+    })
+  }
+  return result
+}
+
+export function hasLaunchedBefore(): boolean {
+  if (typeof window === 'undefined') return false
+  return localStorage.getItem(STORAGE_KEY_PREFIX + LAUNCHED_KEY) === '1'
+}
+
+export function markLaunched(): void {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(STORAGE_KEY_PREFIX + LAUNCHED_KEY, '1')
+}
+
+export function isProfileComplete(user: UserProfile): boolean {
+  if (user.is_demo) return true
+  return Boolean(
+    user.id
+    && user.id !== 'user_unregistered'
+    && user.name?.trim()
+    && user.disaster_prefecture
+    && user.disaster_city
+    && user.user_role
+  )
 }
 
 // 全国市区町村の初期災害レベル (初期値 Lv0)
@@ -67,7 +116,7 @@ const INITIAL_DISASTER_LEVELS: DisasterLevelItem[] = CITIES_DATA.map(c => ({
   updated_at: new Date().toISOString(),
 }))
 
-// 未ログイン状態の初期ユーザー（1-1-1 仕様）
+// 未ログイン状態の初期ユーザー（3-1 仕様）
 const INITIAL_UNLOGGED_USER: UserProfile = {
   id: 'user_unregistered',
   user_code: '',
@@ -81,10 +130,10 @@ const INITIAL_UNLOGGED_USER: UserProfile = {
   is_verified: false,
 }
 
-// デモユーザーの初期データ (1-2, 3-1-1 仕様: 会員証発行済み)
+// デモユーザーの初期データ (3-1, 3-2 仕様: デモモード用)
 const INITIAL_DEMO_USER: UserProfile = {
   id: 'user_demo_1',
-  user_code: 'ASU-9900-DEMO',
+  user_code: '',
   card_id: 'CARD-2026-88192',
   name: 'あすのわ太郎',
   role: 'user',
@@ -418,15 +467,11 @@ export function getUserProfile(): UserProfile {
 
 export function saveUserProfile(profile: Partial<UserProfile>): UserProfile {
   const current = getUserProfile()
-  let userCode = current.user_code
-  if (!userCode && (profile.name || profile.disaster_city)) {
-    userCode = generateUserCode()
-  }
 
   const updated: UserProfile = {
     ...current,
     ...profile,
-    user_code: profile.user_code ?? userCode ?? '',
+    user_code: profile.user_code ?? current.user_code ?? '',
     updated_at: new Date().toISOString(),
   }
   setStorage('user', updated)
@@ -459,31 +504,36 @@ export function setAdminUserMode(): UserProfile {
   return adminUser
 }
 
-export function loginWithUserCode(code: string): { success: boolean; user?: UserProfile; error?: string } {
-  const cleanCode = code.trim().toUpperCase()
-  if (!cleanCode) return { success: false, error: 'ユーザーコードを入力してください' }
-
-  const allUsers = getAllUsers()
-  const found = allUsers.find(u => u.user_code.toUpperCase() === cleanCode)
-  if (found) {
-    setStorage('user', found)
-    return { success: true, user: found }
+export function registerOrLoginWithSocial(provider: 'google' | 'line'): UserProfile {
+  const current = getUserProfile()
+  if (current.id && current.id !== 'user_unregistered' && !current.is_demo) {
+    return current
   }
 
+  const newUserId = 'user_' + provider + '_' + Date.now().toString().slice(-6)
   const newUser: UserProfile = {
-    id: 'user_' + Date.now(),
-    user_code: cleanCode,
-    name: '一般ユーザー (' + cleanCode.slice(-4) + ')',
+    id: newUserId,
+    user_code: '',
+    name: '', // 空欄で初期化 (4-1 仕様)
     role: 'user',
     user_role: 'victim',
-    disaster_prefecture: '鳥取県',
-    disaster_city: '米子市',
+    disaster_prefecture: '', // 空欄で初期化 (4-1 仕様)
+    disaster_city: '', // 空欄で初期化 (4-1 仕様)
     account_status: 'active',
     is_demo: false,
-    is_verified: false,
+    is_verified: true, // ソーシャル連携により認証扱い
+    linked_google: provider === 'google',
+    linked_line: provider === 'line',
+    card_id: 'CARD-2026-' + Math.floor(10000 + Math.random() * 90000),
+    issue_date: new Date().toLocaleDateString('ja-JP'),
+    expire_date: '2028年03月31日',
   }
-  saveUserProfile(newUser)
-  return { success: true, user: newUser }
+
+  setStorage('user', newUser)
+  const allUsers = getAllUsers()
+  allUsers.push(newUser)
+  setStorage('all_users', allUsers)
+  return newUser
 }
 
 export function getAllUsers(): UserProfile[] {

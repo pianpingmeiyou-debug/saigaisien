@@ -1,47 +1,56 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, Suspense } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertTriangle, Check, ChevronRight, Clock3,
   FileText, Flag, HeartHandshake, MapPin, Menu,
   MessageCircle, Package, Search, Send, ShieldCheck,
   SlidersHorizontal, UserRound, X, Plus, LogIn, LockKeyhole,
   ChevronDown, Home as HomeIcon, Map as MapIcon, MessageSquare,
-  Sparkles, Power
+  Sparkles, Power, UserPlus, ShieldAlert
 } from 'lucide-react'
 
 import {
   getUserProfile, saveUserProfile, getCityDisasterLevel, getLocationDisasterLevel,
   getSortedFilteredPosts, addPost, applyAndCreateMatch, getDisasterLevels,
-  getSystemStatus, isWithin12Hours
+  getSystemStatus, isWithin12Hours, isProfileComplete, setDemoUserMode,
+  registerOrLoginWithSocial, expandSearchTerms, hasLaunchedBefore, markLaunched
 } from '@/lib/store'
 import { UserRole, PostCategory, UrgencyLevel, PostItem, DisasterLevelItem } from '@/lib/types'
 import { PREFECTURES, getCitiesByPrefecture } from '@/lib/cities'
 import ReportModal from '@/components/report-modal'
+import BottomNav, { AppTab } from '@/components/bottom-nav'
 
 const DisasterMap = dynamic(() => import('@/components/disaster-map'), { ssr: false })
 
-type Tab = '検索' | '投稿' | '地図' | 'チャット' | 'マイページ'
-
-function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'red' | 'amber' | 'green' | 'blue' | 'neutral' }) {
-  return <span className={`badge badge-${tone}`}>{children}</span>
-}
-
-export default function Page() {
+function PageContent() {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('検索')
+  const searchParams = useSearchParams()
+
+  const [tab, setTab] = useState<AppTab>('検索')
+
+  // URLパラメーター ?tab=投稿 や ?tab=地図 の同期 (version1.md 3-1 投稿・地図タブクリック画面遷移修正)
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as AppTab | null
+    if (tabParam && ['検索', '投稿', '地図', 'チャット', 'マイページ'].includes(tabParam)) {
+      setTab(tabParam)
+    }
+  }, [searchParams])
 
   // ユーザープロファイル
   const [user, setUser] = useState(getUserProfile())
 
+  // 初回起動判定
+  const [isFirstLaunch, setIsFirstLaunch] = useState(false)
+
+  // ログイン・登録ダイアログ表示フラグ
+  const [showAuthModal, setShowAuthModal] = useState(false)
+
   // システム全面停止状態
   const [isSystemStopped, setIsSystemStopped] = useState(false)
-
-  // 災害レベル
-  const disasterLevels = useMemo(() => getDisasterLevels(), [])
 
   const currentDisasterLevel = useMemo(() => {
     return getCityDisasterLevel(user.disaster_prefecture, user.disaster_city)
@@ -51,13 +60,24 @@ export default function Page() {
   const [urgencyFilter, setUrgencyFilter] = useState('すべて')
   const [categoryFilter, setCategoryFilter] = useState('すべて')
   const [typeFilter, setTypeFilter] = useState<'すべて' | 'request' | 'offer'>('すべて')
-  const [selectedPost, setSelectedPost] = useState<PostItem | null>(null)
-  const [reportTargetPost, setReportTargetPost] = useState<PostItem | null>(null)
 
   const [notice, setNotice] = useState('')
   const [modalLockMsg, setModalLockMsg] = useState<string | null>(null)
 
-  // 5-1. 投稿フォーム状態 (物資カテゴリの複数選択対応)
+  // 初回プロフィール入力用フォーム状態
+  const [initProfile, setInitProfile] = useState<{
+    name: string
+    user_role: UserRole
+    prefecture: string
+    city: string
+  }>({
+    name: '',
+    user_role: 'victim',
+    prefecture: '',
+    city: '',
+  })
+
+  // 投稿フォーム状態
   const [form, setForm] = useState<{
     categories: PostCategory[]
     quantity: string
@@ -84,6 +104,16 @@ export default function Page() {
     const freshUser = getUserProfile()
     setUser(freshUser)
     setIsSystemStopped(getSystemStatus().is_stopped)
+
+    const launched = hasLaunchedBefore()
+    if (!launched) {
+      setIsFirstLaunch(true)
+    }
+
+    if (!freshUser.id || freshUser.id === 'user_unregistered') {
+      setShowAuthModal(true)
+    }
+
     setForm(prev => ({
       ...prev,
       placePref: freshUser.disaster_prefecture || '鳥取県',
@@ -97,29 +127,58 @@ export default function Page() {
     setTimeout(() => setNotice(''), 3000)
   }
 
-  const selectTab = (nextTab: Tab) => {
-    if (nextTab === 'チャット') {
-      router.push('/chat')
-      return
-    }
-    if (nextTab === 'マイページ') {
-      router.push('/account')
-      return
-    }
-    setTab(nextTab)
+  const profileComplete = isProfileComplete(user)
+
+  const handleSocialAuth = (provider: 'google' | 'line') => {
+    markLaunched()
+    const registered = registerOrLoginWithSocial(provider)
+    setUser(registered)
+    setShowAuthModal(false)
+    showNotice(`${provider.toUpperCase()}連携が完了しました。基本プロフィールを設定してください。`)
   }
 
-  // ソート・フィルタリング投稿一覧 (活動地域最優先 & 複数カテゴリ対応)
+  const handleDemoAuth = () => {
+    markLaunched()
+    const demoUser = setDemoUserMode('victim')
+    setUser(demoUser)
+    setShowAuthModal(false)
+    showNotice('デモモードでログインしました。')
+  }
+
+  const handleInitProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!initProfile.name.trim() || !initProfile.prefecture || !initProfile.city) {
+      showNotice('すべての必須項目を入力してください')
+      return
+    }
+
+    const updated = saveUserProfile({
+      name: initProfile.name.trim(),
+      user_role: initProfile.user_role,
+      disaster_prefecture: initProfile.prefecture,
+      disaster_city: initProfile.city,
+    })
+    setUser(updated)
+    setForm(prev => ({
+      ...prev,
+      placePref: updated.disaster_prefecture,
+      placeCity: updated.disaster_city,
+      postType: updated.user_role === 'victim' ? 'request' : 'offer',
+    }))
+    showNotice('プロフィール設定が完了しました！明日の環へようこそ')
+  }
+
+  // version1.md 2-1 AI関連検索 (自家用車→くるま/車/自動車/マイカー, 毛布→布団/ふとん/防寒/寝具 等)
   const postsList = useMemo(() => {
     const sorted = getSortedFilteredPosts(user.disaster_prefecture, user.disaster_city, user.user_role)
+    const expandedTerms = query.trim() ? expandSearchTerms(query) : []
 
-    const terms = query.split(/[、,\s]+/).map(t => t.trim()).filter(Boolean)
     return sorted.filter(p => {
       const catString = p.categories ? p.categories.join(' ') : p.category
       const searchable = `${p.description} ${catString} ${p.received_location} ${p.user_name} ${(p.tags ?? []).join(' ')}`.toLowerCase()
-      const matchesQuery = terms.length === 0 || terms.some(t => searchable.includes(t.toLowerCase()))
-      const matchesUrgency = urgencyFilter === 'すべて' || p.urgency === urgencyFilter
 
+      const matchesQuery = expandedTerms.length === 0 || expandedTerms.some(t => searchable.includes(t.toLowerCase()))
+      const matchesUrgency = urgencyFilter === 'すべて' || p.urgency === urgencyFilter
       const matchesCategory = categoryFilter === 'すべて' || (
         p.categories
           ? p.categories.includes(categoryFilter as PostCategory)
@@ -130,7 +189,6 @@ export default function Page() {
     })
   }, [user.disaster_prefecture, user.disaster_city, user.user_role, query, urgencyFilter, categoryFilter, typeFilter])
 
-  // 5-1. 投稿送信ハンドラ (複数選択カテゴリ対応)
   const submitPost = () => {
     if (user.account_status === 'frozen') {
       setModalLockMsg('ご利用のアカウントは凍結されているため、投稿機能はご利用いただけません。')
@@ -177,26 +235,22 @@ export default function Page() {
       tags: '',
     })
     setTab('検索')
+    router.push('/?tab=検索')
   }
 
-  // 応募/申し出ハンドラ
   const handleApplyPost = (post: PostItem) => {
     if (user.account_status === 'frozen') {
-      setSelectedPost(null)
       setModalLockMsg('ご利用のアカウントは凍結されているため、マッチング申請はできません。')
       return
     }
 
     const postLevel = getLocationDisasterLevel(post.received_location)
     if (postLevel >= 3) {
-      setSelectedPost(null)
       setModalLockMsg('この機能はレベル2以下の時のみ利用できます。安全な状態になるまでお待ち下さい。')
       return
     }
 
     const res = applyAndCreateMatch(post.id)
-    setSelectedPost(null)
-
     if (res.success && res.chat) {
       showNotice('マッチングが成立しました！チャットへ移動します')
       setTimeout(() => {
@@ -208,6 +262,7 @@ export default function Page() {
   }
 
   const availableCitiesForPost = getCitiesByPrefecture(form.placePref)
+  const availableInitCities = getCitiesByPrefecture(initProfile.prefecture || '鳥取県')
 
   return (
     <main className="app-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', paddingBottom: '80px', background: '#f8fafc' }}>
@@ -219,56 +274,207 @@ export default function Page() {
         </div>
       )}
 
-      {/* システム全面停止時のオーバーレイ案内画面 */}
-      {isSystemStopped && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.92)',
-            zIndex: 10000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            color: '#ffffff',
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              color: '#0f172a',
-              maxWidth: '540px',
-              width: '100%',
-              borderRadius: '20px',
-              padding: '32px 24px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-              textAlign: 'center',
-            }}
-          >
-            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#fee2e2', color: '#ef4444', display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
-              <Power size={32} />
-            </div>
-
-            <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '0 0 16px', color: '#991b1b' }}>
-              現在、サービスの提供を一時停止しております
+      {/* アプリ起動・ログイン・会員登録ダイアログ */}
+      {showAuthModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '20px', maxWidth: '440px', width: '100%', padding: '28px 24px', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)' }}>
+            <img src="/asunowa.png" alt="明日の環" style={{ height: '44px', margin: '0 auto 12px' }} />
+            <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '0 0 6px', color: '#0f172a' }}>
+              {isFirstLaunch ? '明日の環へようこそ' : 'ログイン / デモモード'}
             </h2>
-
-            <p style={{ fontSize: '14px', lineHeight: 1.7, color: '#334155', textAlign: 'left', background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
-              いつもご利用いただきありがとうございます。現在、誤情報（デマ）の拡散防止およびシステム確認のため、すべての機能を一時的に停止しております。ご利用の皆様にはご不便・ご迷惑をおかけいたしますが、ご理解とご協力のほどよろしくお願い申し上げます。
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '24px', lineHeight: 1.5 }}>
+              災害時・平時の相互支援アプリ「明日の環」です。<br />会員登録またはデモモードを選択してください。
             </p>
 
-            <div style={{ textAlign: 'left', background: '#eff6ff', padding: '14px', borderRadius: '12px', fontSize: '13px', color: '#1e40af' }}>
-              <strong>■ 再開について</strong>
-              <p style={{ margin: '4px 0 0', fontSize: '12px' }}>
-                状況の安全が確認でき次第、順次サービスを再開いたします。
-              </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button
+                type="button"
+                onClick={() => handleSocialAuth('google')}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                }}
+              >
+                <span style={{ fontSize: '16px' }}>🌐</span> Googleで会員登録 / ログイン
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSocialAuth('line')}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: '#06c755',
+                  color: '#ffffff',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '16px' }}>💬</span> LINEで会員登録 / ログイン
+              </button>
+
+              <div style={{ margin: '8px 0', fontSize: '12px', color: '#94a3b8' }}>または</div>
+
+              <button
+                type="button"
+                onClick={handleDemoAuth}
+                style={{
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid #bae6fd',
+                  background: '#e0f2fe',
+                  color: '#0369a1',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Sparkles size={16} /> デモモードで体験する
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 3-1, 4-1: ヘッダー (左上アイコン asunowa.png ＆ タブ表示改善) */}
+      {/* 初回ログイン後の基本プロフィール設定画面 */}
+      {!profileComplete && !showAuthModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.9)', zIndex: 9900, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '20px', maxWidth: '480px', width: '100%', padding: '28px 24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '0 0 8px', color: '#0f172a', textAlign: 'center' }}>
+              初回プロフィール設定
+            </h2>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', textAlign: 'center' }}>
+              すべての項目を入力してください。（設定完了後アプリを利用できます）
+            </p>
+
+            <form onSubmit={handleInitProfileSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>
+                  公開表示名（ニックネーム） <span style={{ color: '#ef4444' }}>*必須</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="例：あすのわ太郎"
+                  value={initProfile.name}
+                  onChange={(e) => setInitProfile({ ...initProfile, name: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>
+                  役割の選択 <span style={{ color: '#ef4444' }}>*必須</span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                  {[
+                    { role: 'victim', label: '被災者' },
+                    { role: 'supporter', label: '支援者' },
+                    { role: 'both', label: '共助' },
+                  ].map((item) => (
+                    <button
+                      key={item.role}
+                      type="button"
+                      onClick={() => setInitProfile({ ...initProfile, user_role: item.role as UserRole })}
+                      style={{
+                        padding: '10px 4px',
+                        borderRadius: '8px',
+                        border: initProfile.user_role === item.role ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: initProfile.user_role === item.role ? '#e0f2fe' : '#ffffff',
+                        color: initProfile.user_role === item.role ? '#0284c7' : '#334155',
+                        fontWeight: 'bold',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>
+                  活動地域（都道府県・市区町村） <span style={{ color: '#ef4444' }}>*必須</span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <select
+                    value={initProfile.prefecture}
+                    onChange={(e) => {
+                      const pref = e.target.value
+                      const cities = getCitiesByPrefecture(pref)
+                      setInitProfile({ ...initProfile, prefecture: pref, city: cities[0]?.city || '' })
+                    }}
+                    required
+                    style={{ padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  >
+                    <option value="">都道府県を選択</option>
+                    {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+
+                  <select
+                    value={initProfile.city}
+                    onChange={(e) => setInitProfile({ ...initProfile, city: e.target.value })}
+                    required
+                    style={{ padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  >
+                    <option value="">市区町村を選択</option>
+                    {availableInitCities.map(c => <option key={c.city} value={c.city}>{c.city}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="primary-button full"
+                style={{ padding: '12px', fontSize: '15px', fontWeight: 'bold', justifyContent: 'center', marginTop: '10px' }}
+              >
+                設定を完了してアプリを開始
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* システム全面停止時オーバーレイ */}
+      {isSystemStopped && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.92)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', color: '#ffffff' }}>
+          <div style={{ background: '#ffffff', color: '#0f172a', maxWidth: '540px', width: '100%', borderRadius: '20px', padding: '32px 24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', textAlign: 'center' }}>
+            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#fee2e2', color: '#ef4444', display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
+              <Power size={32} />
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: '800', margin: '0 0 16px', color: '#991b1b' }}>
+              現在、サービスの提供を一時停止しております
+            </h2>
+            <p style={{ fontSize: '14px', lineHeight: 1.7, color: '#334155', textAlign: 'left', background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
+              誤情報（デマ）の拡散防止およびシステム確認のため、すべての機能を一時的に停止しております。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ヘッダー */}
       <header
         className="topbar"
         style={{
@@ -286,7 +492,6 @@ export default function Page() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '8px', padding: '6px 0' }}>
-          {/* 4-1 左上アイコン public/asunowa.png */}
           <Link href="/" className="brand" aria-label="明日の環 ホーム" style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', gap: '10px' }}>
             <img src="/asunowa.png" alt="明日の環" style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
             <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
@@ -295,7 +500,6 @@ export default function Page() {
             </div>
           </Link>
 
-          {/* 右上: 活動地域 & レベル */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {user.disaster_city && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f1f5f9', padding: '4px 10px', borderRadius: '16px', fontSize: '12px' }}>
@@ -314,15 +518,14 @@ export default function Page() {
             </Link>
           </div>
         </div>
-
       </header>
 
-      {/* アラートロックメッセージ モーダル */}
+      {/* アラートロックメッセージ */}
       {modalLockMsg && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 8000, display: 'grid', placeItems: 'center', padding: '20px' }}>
           <div style={{ background: '#ffffff', padding: '24px', borderRadius: '16px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
             <AlertTriangle size={36} color="#ef4444" style={{ marginBottom: '12px' }} />
-            <h3 style={{ margin: '0 0 10px', fontSize: '17px' }}>利用制限・お知らせ</h3>
+            <h3 style={{ margin: '0 0 10px', fontSize: '17px' }}>お知らせ</h3>
             <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.6, marginBottom: '20px' }}>{modalLockMsg}</p>
             <button className="primary-button full" onClick={() => setModalLockMsg(null)}>
               確認しました
@@ -331,10 +534,10 @@ export default function Page() {
         </div>
       )}
 
-      {/* メインコンテンツ エリア */}
+      {/* メインコンテンツ */}
       <div style={{ flex: 1, maxWidth: '1080px', width: '100%', margin: '0 auto', padding: '20px 16px 80px' }}>
 
-        {/* 7. 地図タブ */}
+        {/* 地図タブ */}
         {tab === '地図' && (
           <div>
             <DisasterMap
@@ -344,7 +547,7 @@ export default function Page() {
           </div>
         )}
 
-        {/* 5. 検索タブ */}
+        {/* 検索タブ */}
         {tab === '検索' && (
           <div>
             <div className="content-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -360,7 +563,10 @@ export default function Page() {
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setTab('投稿')}
+                onClick={() => {
+                  setTab('投稿')
+                  router.push('/?tab=投稿')
+                }}
                 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Plus size={16} />
@@ -368,7 +574,7 @@ export default function Page() {
               </button>
             </div>
 
-            {/* 検索・絞り込みバー */}
+            {/* 検索・絞り込みバー (version1.md 2-1: 自家用車・毛布等AI関連検索対応) */}
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
                 <div className="search-input" style={{ flex: 1, minWidth: '240px' }}>
@@ -376,7 +582,7 @@ export default function Page() {
                   <input
                     value={query}
                     onChange={e => setQuery(e.target.value)}
-                    placeholder="物資名・市区町村・投稿者で検索..."
+                    placeholder="自家用車・毛布・水・バッテリー等でAI関連検索..."
                   />
                 </div>
               </div>
@@ -426,7 +632,7 @@ export default function Page() {
                     onChange={e => setCategoryFilter(e.target.value)}
                     style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
                   >
-                    {['すべて', '食料', '飲料', '衣類', '医薬品', '生活用品', '電気機器', '乳幼児用品', 'その他'].map(c => (
+                    {['すべて', '食料', '飲料水', '衣類', '医薬品', '生活用品', '電気機器', '乳幼児用品', 'その他'].map(c => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
@@ -434,7 +640,7 @@ export default function Page() {
               </div>
             </div>
 
-            {/* 投稿一覧 (8. 12時間以内表示 & 認証マーク表示) */}
+            {/* 投稿一覧 */}
             {postsList.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#94a3b8' }}>
                 <Package size={40} style={{ marginBottom: '12px' }} />
@@ -444,12 +650,15 @@ export default function Page() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
                 {postsList.map(post => {
                   const is12h = isWithin12Hours(post.created_at)
+                  const cardBg = post.type === 'request' ? '#fef2f2' : '#eff6ff'
+                  const cardBorder = post.type === 'request' ? '#fecaca' : '#bfdbfe'
+
                   return (
                     <div
                       key={post.id}
                       style={{
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
+                        background: cardBg,
+                        border: `1px solid ${cardBorder}`,
                         borderRadius: '14px',
                         padding: '18px',
                         display: 'flex',
@@ -462,26 +671,42 @@ export default function Page() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <span
                             style={{
-                              fontSize: '11px',
+                              fontSize: '12px',
                               fontWeight: 700,
                               padding: '2px 8px',
-                              borderRadius: '4px',
-                              background: post.type === 'request' ? '#fef2f2' : '#f0fdf4',
-                              color: post.type === 'request' ? '#991b1b' : '#166534',
+                              borderRadius: '6px',
+                              background: post.type === 'request' ? '#fee2e2' : '#dbeafe',
+                              color: post.type === 'request' ? '#991b1b' : '#1e40af',
                             }}
                           >
                             {post.type === 'request' ? '支援依頼' : '支援提供'} [{post.categories && post.categories.length > 0 ? post.categories.join('・') : post.category}]
                           </span>
 
-                          {/* 8. 12時間以内表示 */}
-                          {is12h && (
-                            <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold', background: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
-                              🟢 12時間以内
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                background: post.urgency === '高' ? '#ef4444' : post.urgency === '中' ? '#f59e0b' : '#64748b',
+                                color: '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              🚨 緊急度: {post.urgency}
                             </span>
-                          )}
+
+                            {is12h && (
+                              <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 'bold', background: '#dcfce7', padding: '2px 6px', borderRadius: '10px' }}>
+                                🟢 12時間以内
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {/* タイトル削除仕様のため説明を重視表示 */}
                         <p style={{ fontSize: '15px', color: '#0f172a', fontWeight: 600, margin: '0 0 10px', lineHeight: 1.5 }}>
                           {post.description}
                         </p>
@@ -492,15 +717,14 @@ export default function Page() {
 
                         <div style={{ fontSize: '12px', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <span>投稿者: <b>{post.user_name}</b></span>
-                          {/* 名前横の認証マーク */}
                           {post.is_verified_user && (
                             <img src="/ninsyou.png" alt="認証" style={{ height: '15px' }} title="本人確認済み" />
                           )}
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
-                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', borderTop: '1px solid rgba(0,0,0,0.06)', paddingTop: '10px' }}>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
                           {new Date(post.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
 
@@ -521,17 +745,27 @@ export default function Page() {
           </div>
         )}
 
-        {/* 4. 投稿タブ (タイトル欄を完全削除 & 例表示) */}
+        {/* 投稿タブ */}
         {tab === '投稿' && (
-          <div style={{ maxWidth: '640px', margin: '0 auto', background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-            <h2 style={{ fontSize: '20px', margin: '0 0 6px', color: '#0f172a' }}>支援情報の新規投稿</h2>
+          <div
+            style={{
+              maxWidth: '640px',
+              margin: '0 auto',
+              background: user.user_role === 'victim' || (user.user_role === 'both' && form.postType === 'request') ? '#fef2f2' : '#eff6ff',
+              border: user.user_role === 'victim' || (user.user_role === 'both' && form.postType === 'request') ? '1px solid #fecaca' : '1px solid #bfdbfe',
+              padding: '28px',
+              borderRadius: '16px',
+            }}
+          >
+            <h2 style={{ fontSize: '20px', margin: '0 0 6px', color: '#0f172a' }}>
+              {user.user_role === 'victim' ? '支援の依頼（必要）' : user.user_role === 'supporter' ? '支援の提供（お渡し）' : form.postType === 'request' ? '支援の依頼（必要）' : '支援の提供（お渡し）'}
+            </h2>
             <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
-              被災者の方は必要な物資依頼を、支援者の方は提供可能な物資を登録してください。
+              あてはまる項目を入力して投稿を作成してください。
             </p>
 
             <form onSubmit={e => { e.preventDefault(); submitPost(); }} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
 
-              {/* 共助ユーザー向け種別選択 */}
               {user.user_role === 'both' && (
                 <div>
                   <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>投稿の種別</label>
@@ -556,9 +790,9 @@ export default function Page() {
                       style={{
                         padding: '10px',
                         borderRadius: '8px',
-                        border: form.postType === 'offer' ? '2px solid #16a34a' : '1px solid #cbd5e1',
-                        background: form.postType === 'offer' ? '#f0fdf4' : '#ffffff',
-                        color: form.postType === 'offer' ? '#15803d' : '#475569',
+                        border: form.postType === 'offer' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: form.postType === 'offer' ? '#eff6ff' : '#ffffff',
+                        color: form.postType === 'offer' ? '#0369a1' : '#475569',
                         fontWeight: 'bold',
                       }}
                     >
@@ -568,15 +802,11 @@ export default function Page() {
                 </div>
               )}
 
-              {/* 5-1. 物資カテゴリの複数選択対応 */}
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '4px', color: '#334155' }}>
                   物資カテゴリ (複数選択可能)
                 </label>
-                <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '8px' }}>
-                  ※複数選択できます。あてはまるものをすべて選択してください。
-                </span>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', background: '#ffffff', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
                   {(['食料', '飲料水', '衣類', '医薬品', '生活用品', '衛生用品', '電気機器', '乳幼児用品', 'その他'] as PostCategory[]).map(cat => {
                     const isChecked = form.categories.includes(cat)
                     return (
@@ -594,7 +824,6 @@ export default function Page() {
                           fontWeight: isChecked ? 'bold' : 'normal',
                           fontSize: '13px',
                           cursor: 'pointer',
-                          userSelect: 'none',
                         }}
                       >
                         <input
@@ -616,7 +845,33 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* 4. 受け取り場所入力欄 (例表示: 例：物資ロッカー ○○前) */}
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>
+                  緊急度（高・中・低）
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  {(['高', '中', '低'] as UrgencyLevel[]).map((urg) => (
+                    <button
+                      key={urg}
+                      type="button"
+                      onClick={() => setForm({ ...form, urgency: urg })}
+                      style={{
+                        padding: '8px',
+                        borderRadius: '8px',
+                        border: form.urgency === urg ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        background: form.urgency === urg ? '#e0f2fe' : '#ffffff',
+                        color: form.urgency === urg ? '#0284c7' : '#334155',
+                        fontWeight: 'bold',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {urg}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>受け取り場所</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
@@ -669,63 +924,16 @@ export default function Page() {
 
       </div>
 
-      {/* フッター：ページ切り替えタブ */}
-      {/* 3-1: ページ切り替えタブ (PCで文字切れを防ぎ横スクロール対応) */}
-      <footer style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000,
-        background: '#ffffff',
-        borderTop: '1px solid #e2e8f0',
-        boxShadow: '0 -2px 8px rgba(0, 0, 0, 0.05)',
-      }}
-      >
-        <nav
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '2px',
-            width: '100%',
-            padding: '8px 6px',
-            boxSizing: 'border-box',
-            overflowX: 'auto',
-          }}
-        >
-          {(['検索', '投稿', '地図', 'チャット', 'マイページ'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => selectTab(t)}
-              style={{
-                padding: '8px 8px',
-                borderRadius: '8px',
-                border: 'none',
-                background: tab === t ? '#e0f2fe' : 'transparent',
-                color: tab === t ? '#0284c7' : '#475569',
-                fontWeight: tab === t ? 700 : 500,
-                fontSize: '14px',
-                whiteSpace: 'nowrap',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px',
-                flexShrink: 0,
-              }}
-            >
-              {t === '検索' && <Search size={15} />}
-              {t === '投稿' && <Plus size={15} />}
-              {t === '地図' && <MapIcon size={15} />}
-              {t === 'チャット' && <MessageSquare size={15} />}
-              {t === 'マイページ' && <UserRound size={15} />}
-              <span>{t}</span>
-            </button>
-          ))}
-        </nav>
-      </footer>
+      {/* 19 & version1.md 3-1: 下部ナビゲーション (5タブ) */}
+      <BottomNav active={tab} />
     </main>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div style={{ padding: '40px', textAlign: 'center' }}>読み込み中...</div>}>
+      <PageContent />
+    </Suspense>
   )
 }

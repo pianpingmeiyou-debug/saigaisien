@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { FormEvent, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { saveUserProfile } from '@/lib/store'
+import { markLaunched, saveUserProfile, hasLaunchedBefore, setDemoUserMode } from '@/lib/store'
 import { ArrowLeft, Check } from 'lucide-react'
 
 export default function LoginPage() {
@@ -13,6 +13,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [isReturning, setIsReturning] = useState(false)
+
+  useState(() => {
+    if (typeof window !== 'undefined') {
+      setIsReturning(hasLaunchedBefore())
+    }
+  })
 
   // Google認証
   const handleGoogleLogin = async () => {

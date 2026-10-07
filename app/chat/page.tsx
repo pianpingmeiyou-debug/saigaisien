@@ -13,6 +13,7 @@ import {
 } from '@/lib/store'
 import { ChatSession, UserRole } from '@/lib/types'
 import ReportModal from '@/components/report-modal'
+import BottomNav from '@/components/bottom-nav'
 
 function ChatPageContent() {
   const router = useRouter()
@@ -478,6 +479,9 @@ function ChatPageContent() {
           }}
         />
       )}
+
+      {/* 19-1: チャット画面でも下部5タブナビゲーションを常に表示 */}
+      <BottomNav active="チャット" />
     </main>
   )
 }

@@ -7,7 +7,8 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
   AlertTriangle, LocateFixed, MapPin, RotateCcw, Search, Trash2, X, Flag, Camera, Eye,
-  CheckCircle2, XCircle, Plus, Upload, MessageSquare, Users, ShieldCheck, RefreshCw
+  CheckCircle2, XCircle, Plus, Upload, MessageSquare, Users, ShieldCheck, RefreshCw,
+  HelpCircle, ChevronLeft, ChevronRight, Navigation, Crosshair
 } from 'lucide-react'
 import {
   getMapPins, deleteMapPin, MapPinItem, votePin, addShelterReport, addSubPostToPin,
@@ -40,6 +41,17 @@ function icon(type: MapPinItem['type']) {
   })
 }
 
+// 13. 現在地用アイコンマーカー
+const currentLocationIcon = L.divIcon({
+  className: 'current-location-pin',
+  html: `<div style="position:relative; width:24px; height:24px;">
+    <div style="position:absolute; width:24px; height:24px; background:rgba(2, 132, 199, 0.3); border-radius:50%; animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>
+    <div style="position:absolute; top:4px; left:4px; width:16px; height:16px; background:#0284c7; border:3px solid #ffffff; border-radius:50%; box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>
+  </div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+})
+
 function MapSizeFix() {
   const map = useMap()
   useEffect(() => {
@@ -55,6 +67,15 @@ function MapSizeFix() {
   return null
 }
 
+function MapViewController({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap()
+  useEffect(() => {
+    map.setView(center, zoom, { animate: true })
+  }, [map, center, zoom])
+  return null
+}
+
+// 14. 右上ボタン用コントロール（大きいタップ領域で押しやすい）
 function MapControls({
   onNotice,
   centerPos
@@ -65,11 +86,38 @@ function MapControls({
   const map = useMap()
 
   return (
-    <div className="map-controls" aria-label="地図操作">
+    <div
+      className="map-controls"
+      aria-label="地図操作"
+      style={{
+        position: 'absolute',
+        top: '14px',
+        right: '14px',
+        zIndex: 500,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+      }}
+    >
+      {/* 14-1: 位置情報ボタン */}
       <button
         type="button"
         aria-label="現在地へ移動"
-        onClick={() => {
+        style={{
+          width: '48px',
+          height: '48px',
+          borderRadius: '12px',
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          color: '#0284c7',
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
           if (!navigator.geolocation) {
             onNotice('お使いの端末ではGPS位置情報がサポートされていません')
             return
@@ -77,7 +125,7 @@ function MapControls({
 
           navigator.geolocation.getCurrentPosition(
             (pos) => {
-              map.setView([pos.coords.latitude, pos.coords.longitude], 14)
+              map.setView([pos.coords.latitude, pos.coords.longitude], 15)
               onNotice('現在地に移動しました')
             },
             () => {
@@ -86,19 +134,34 @@ function MapControls({
           )
         }}
       >
-        <LocateFixed size={17} />
+        <LocateFixed size={24} />
       </button>
 
+      {/* 14-2: 更新・中央リセットボタン */}
       <button
         type="button"
-        aria-label="活動地域を中心に戻す"
-        title="活動地域を中心に表示"
-        onClick={() => {
-          map.setView(centerPos, 12)
-          onNotice('活動地域を中心に再表示しました')
+        aria-label="地図を更新"
+        title="ピン・表示を再読み込み"
+        style={{
+          width: '48px',
+          height: '48px',
+          borderRadius: '12px',
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          color: '#334155',
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          map.setView(centerPos, map.getZoom())
+          onNotice('地図のピンを再読み込みしました')
         }}
       >
-        <RotateCcw size={17} />
+        <RefreshCw size={22} />
       </button>
     </div>
   )
@@ -118,6 +181,35 @@ function ClickCapture({
   return null
 }
 
+// 11-3 スライド画像リスト (後から追加・変更可能な構成)
+const SLIDES = [
+  {
+    image: '/map1.png',
+    title: '1 / 5',
+    text: '市民の皆さんが道路状況を確認・共有するためのマップです'
+  },
+  {
+    image: '/map2.png',
+    title: '2 / 5',
+    text: '普段と様子が違う道路や、洪水場所の写真を撮ってください。\n※危険が伴う場合は、身の安全の確保を優先してください'
+  },
+  {
+    image: '/map3.png',
+    title: '3 / 5',
+    text: '自販機や、井戸、避難所にもピンを立てることができます。'
+  },
+  {
+    image: '/map4.png',
+    title: '4 / 5',
+    text: 'すでに地図上にあるピンにも、「事実〇」「誤り×」ボタンで投票ができます。\n※投稿地点から半径2km以内のユーザのみ'
+  },
+  {
+    image: '/map5.png',
+    title: '5 / 5',
+    text: '位置情報をONにして、ピン共有を始めましょう！\n（ONにしないと投稿ができません）'
+  }
+]
+
 export default function DisasterMap({
   onNotice,
   role,
@@ -128,14 +220,13 @@ export default function DisasterMap({
   const router = useRouter()
   const user = getUserProfile()
 
-  // 活動地域（基準地域）を中心座標として計算
+  // 活動地域（基準地域）代表地点を中心座標として計算
   const defaultCenter = useMemo<[number, number]>(() => {
     if (user.disaster_prefecture && user.disaster_city) {
       const cityData = findCity(user.disaster_prefecture, user.disaster_city)
       if (cityData) return [cityData.lat, cityData.lng]
     }
-
-    return [35.4281, 133.3308] // Default 米子市
+    return [35.4281, 133.3308] // 米子市
   }, [user.disaster_prefecture, user.disaster_city])
 
   const [pins, setPins] = useState<MapPinItem[]>([])
@@ -145,7 +236,22 @@ export default function DisasterMap({
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'すべて' | MapPinItem['type']>('すべて')
 
-  // 「正しい/異なる」追加補足モーダル
+  // 13. 現在地座標状態
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+
+  // 15. 地図モード ('submission' = 投稿モード, 'view' = 状況確認モード)
+  const [mapMode, setMapMode] = useState<'submission' | 'view'>('view')
+  const [mapZoom, setMapZoom] = useState(12)
+
+  // 11. 操作方法スライドモーダル
+  const [showHowToModal, setShowHowToModal] = useState(false)
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
+
+  // 12. 操作方法終了後の位置情報案内
+  const [showGpsNotice, setShowGpsNotice] = useState(false)
+  const [hasGrantedGps, setHasGrantedGps] = useState(false)
+
+  // 「事実〇/誤り×」投票モーダル
   const [votingType, setVotingType] = useState<'correct' | 'different' | null>(null)
   const [voteComment, setVoteComment] = useState('')
   const [votePhoto, setVotePhoto] = useState<string | null>(null)
@@ -156,22 +262,17 @@ export default function DisasterMap({
   const [shelterGender, setShelterGender] = useState('')
   const [shelterFacility, setShelterFacility] = useState('')
 
-  // 同じ場所への複数投稿フォーム
-  const [showSubPostForm, setShowSubPostForm] = useState(false)
-  const [subPostContent, setSubPostContent] = useState('')
-
-  // 新規ピン投稿簡易フォーム (地図タップ時)
+  // 16. 新規ピン投稿フォーム
   const [newPinType, setNewPinType] = useState<MapPinItem['type']>('通行注意')
   const [newPinTitle, setNewPinTitle] = useState('')
   const [newPinContent, setNewPinContent] = useState('')
+  const [newPinPhoto, setNewPinPhoto] = useState<string | null>(null)
 
   const refreshPins = () => {
     const loaded = getMapPins().filter(
       p => p.status !== 'hidden' && p.status !== 'deleted'
     )
-
     setPins(loaded)
-
     if (selected) {
       const freshSelected = loaded.find(p => p.id === selected.id)
       if (freshSelected) setSelected(freshSelected)
@@ -180,6 +281,19 @@ export default function DisasterMap({
 
   useEffect(() => {
     refreshPins()
+
+    // 13. 初期現在地取得
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation([pos.coords.latitude, pos.coords.longitude])
+          setHasGrantedGps(true)
+        },
+        () => {
+          setHasGrantedGps(false)
+        }
+      )
+    }
   }, [])
 
   const visiblePins = useMemo(
@@ -192,16 +306,53 @@ export default function DisasterMap({
     [pins, query, filter]
   )
 
-  // 7-1 ピン投稿時 GPS 距離判定 (15km以内)
+  // 15-1, 15-2 モード切り替え (version2.md 4-1-1: 投稿モードは活動地域中心＆最大倍率18)
+  const [targetCenter, setTargetCenter] = useState<[number, number]>(defaultCenter)
+
+  const handleSwitchMode = (mode: 'submission' | 'view') => {
+    setMapMode(mode)
+    if (mode === 'submission') {
+      setTargetCenter(defaultCenter)
+      setMapZoom(18) // 最大倍率
+      onNotice(`投稿モードに切替えました（活動地域 [${user.disaster_city || '登録地域'}] の中心を最大倍率で表示）`)
+    } else {
+      setMapZoom(12) // 通常倍率維持
+      onNotice('状況確認モードに切替えました')
+    }
+  }
+
+  // ピン選択タップハンドラ
   const handlePickPoint = (point: { lat: number; lng: number }) => {
     if (!navigator.geolocation) {
       onNotice('GPS位置情報が取得できないため、ピンを投稿できません')
       return
     }
-
     setConfirmingPoint(point)
   }
 
+  // 16. 写真選択ハンドラ（Max 2MB）
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>, isVote: boolean = false) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 2 * 1024 * 1024) {
+      onNotice('画像サイズは最大2MBまでです')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      const result = evt.target?.result as string
+      if (isVote) {
+        setVotePhoto(result)
+      } else {
+        setNewPinPhoto(result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // 16. ピン作成登録ハンドラ
   const handleCreatePinSubmit = () => {
     if (!confirmingPoint) return
 
@@ -210,13 +361,7 @@ export default function DisasterMap({
         const userLat = pos.coords.latitude
         const userLng = pos.coords.longitude
 
-        const distKm = calculateDistanceKm(
-          userLat,
-          userLng,
-          confirmingPoint.lat,
-          confirmingPoint.lng
-        )
-
+        const distKm = calculateDistanceKm(userLat, userLng, confirmingPoint.lat, confirmingPoint.lng)
         if (distKm > 15) {
           onNotice('位置情報が離れているため、ピンを立てられません')
           setConfirmingPoint(null)
@@ -229,30 +374,30 @@ export default function DisasterMap({
           content: newPinContent.trim() || undefined,
           lat: confirmingPoint.lat,
           lng: confirmingPoint.lng,
+          photo: newPinPhoto || undefined,
           userLat,
           userLng,
         })
 
         if (res.success) {
-          onNotice(`${newPinType}のピンをマップに作成しました`)
+          onNotice(`${newPinType}のピンを作成しました`)
           setConfirmingPoint(null)
           setNewPinTitle('')
           setNewPinContent('')
+          setNewPinPhoto(null)
           refreshPins()
         } else {
           onNotice(res.error || 'ピンの作成に失敗しました')
         }
       },
-      (err) => {
-        onNotice(
-          '位置情報が離れているため、ピンを立てられません（GPSを取得できません）'
-        )
+      () => {
+        onNotice('位置情報が離れているため、ピンを立てられません（GPSを取得できません）')
       },
       { timeout: 5000 }
     )
   }
 
-  // 9. 「正しい〇」「異なる✕」投票処理
+  // 17, 18. 「事実〇」「誤り×」投票ハンドラ (2km以内)
   const handleVoteSubmit = () => {
     if (!selected || !votingType) return
 
@@ -278,8 +423,8 @@ export default function DisasterMap({
         if (res.success) {
           onNotice(
             votingType === 'correct'
-              ? '「正しい〇」の確認を報告しました'
-              : '「異なる✕」の確認を報告しました'
+              ? '「事実〇」の情報を報告しました'
+              : '「誤り×」の情報を報告しました'
           )
           setVotingType(null)
           setVoteComment('')
@@ -289,191 +434,83 @@ export default function DisasterMap({
           onNotice(res.error || '評価を投票できませんでした')
         }
       },
-      (err) => {
-        onNotice(
-          '位置情報が離れているため、確認・投票を行えません（GPS情報を取得できません）'
-        )
-      },
-      { timeout: 5000 }
-    )
-  }
-
-  // 12-2 避難所情報投稿処理 (2km以内)
-  const handleShelterReportSubmit = () => {
-    if (!selected) return
-
-    if (
-      !shelterPeople.trim() &&
-      !shelterGender.trim() &&
-      !shelterFacility.trim()
-    ) {
-      onNotice('少なくともいずれかの項目を入力してください')
-      return
-    }
-
-    if (!navigator.geolocation) {
-      onNotice('GPS位置情報を取得できません（2km以内が必要です）')
-      return
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const userLat = pos.coords.latitude
-        const userLng = pos.coords.longitude
-
-        const res = addShelterReport(
-          selected.id,
-          shelterPeople,
-          shelterGender,
-          shelterFacility,
-          userLat,
-          userLng
-        )
-
-        if (res.success) {
-          onNotice('避難所情報を投稿しました')
-          setShowShelterForm(false)
-          setShelterPeople('')
-          setShelterGender('')
-          setShelterFacility('')
-          refreshPins()
-        } else {
-          onNotice(res.error || '避難所情報を投稿できませんでした')
-        }
-      },
       () => {
-        onNotice('避難所から離れているため情報投稿できません（GPSを取得できません）')
+        onNotice('投稿地点から半径2km以内のユーザーのみ投票できます（GPS情報を取得できません）')
       },
       { timeout: 5000 }
     )
   }
 
-  // 10. 同じ場所への複数投稿追加処理
-  const handleSubPostSubmit = () => {
-    if (!selected || !subPostContent.trim()) return
-
-    const res = addSubPostToPin(selected.id, subPostContent)
-
-    if (res.success) {
-      onNotice('地点へ情報を追加しました')
-      setShowSubPostForm(false)
-      setSubPostContent('')
-      refreshPins()
-    } else {
-      onNotice(res.error || '投稿できませんでした')
+  // 11. 操作方法を閉じた後の処理 (仕様書 12)
+  const handleCloseHowTo = () => {
+    setShowHowToModal(false)
+    if (!hasGrantedGps) {
+      setShowGpsNotice(true)
     }
-  }
-
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-
-    reader.onload = (evt) => {
-      setVotePhoto(evt.target?.result as string)
-    }
-
-    reader.readAsDataURL(file)
   }
 
   return (
-    <div
-      className="map-page"
-      style={{ position: 'relative', width: '100%' }}
-    >
-      {/* ツールバー */}
-      <div
-        className="map-toolbar"
-        style={{
-          marginBottom: '12px',
-          display: 'flex',
-          gap: '10px',
-          flexWrap: 'wrap',
-          alignItems: 'center'
-        }}
-      >
-        <div
-          className="search-input"
-          style={{ flex: 1, minWidth: '220px' }}
-        >
+    <div className="map-page" style={{ position: 'relative', width: '100%' }}>
+
+      {/* 検索バー */}
+      <div className="map-toolbar" style={{ marginBottom: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="search-input" style={{ flex: 1, minWidth: '220px' }}>
           <Search size={17} />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="施設名・投稿内容・井戸・自販機等を検索"
+            placeholder="施設名・投稿内容・井戸・自販機等を検索..."
           />
         </div>
+      </div>
 
-        <div
-          className="map-filters"
-          style={{
-            display: 'flex',
-            gap: '6px',
-            overflowX: 'auto',
-            paddingBottom: '2px'
-          }}
-          aria-label="ピンの絞り込み"
-        >
-          <button
-            className={filter === 'すべて' ? 'active' : ''}
-            onClick={() => setFilter('すべて')}
-          >
-            すべて
-          </button>
-
-          <button
-            className={filter === '避難所' ? 'active' : ''}
-            onClick={() => setFilter('避難所')}
-          >
-            避難所
-          </button>
-
-          <button
-            className={filter === '井戸' ? 'active' : ''}
-            onClick={() => setFilter('井戸')}
-          >
-            井戸
-          </button>
-
-          <button
-            className={filter === '自販機' ? 'active' : ''}
-            onClick={() => setFilter('自販機')}
-          >
-            自販機
-          </button>
-
-          <button
-            className={filter === '指定物資置き場' ? 'active' : ''}
-            onClick={() => setFilter('指定物資置き場')}
-          >
-            物資置き場
-          </button>
-
-          <button
-            className={filter === '通行注意' ? 'active' : ''}
-            onClick={() => setFilter('通行注意')}
-          >
-            交通・被害
-          </button>
-        </div>
-
+      {/* 15. モード切り替えボタン (検索欄の下、地図の上) */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
         <button
           type="button"
-          className="secondary-button"
+          onClick={() => handleSwitchMode('submission')}
           style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: '10px',
+            border: mapMode === 'submission' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+            background: mapMode === 'submission' ? '#e0f2fe' : '#ffffff',
+            color: mapMode === 'submission' ? '#0284c7' : '#475569',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
-            fontSize: '13px',
-            padding: '6px 12px'
-          }}
-          onClick={() => {
-            refreshPins()
-            onNotice('地図情報を最新にリロードしました')
+            justifyContent: 'center',
+            gap: '6px',
+            boxShadow: mapMode === 'submission' ? '0 2px 6px rgba(2, 132, 199, 0.2)' : 'none',
           }}
         >
-          <RefreshCw size={14} /> リロード
+          <Crosshair size={16} />
+          投稿モード
+        </button>
+        <button
+          type="button"
+          onClick={() => handleSwitchMode('view')}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: '10px',
+            border: mapMode === 'view' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+            background: mapMode === 'view' ? '#e0f2fe' : '#ffffff',
+            color: mapMode === 'view' ? '#0284c7' : '#475569',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            boxShadow: mapMode === 'view' ? '0 2px 6px rgba(2, 132, 199, 0.2)' : 'none',
+          }}
+        >
+          <Eye size={16} />
+          状況確認モード
         </button>
       </div>
 
@@ -481,25 +518,29 @@ export default function DisasterMap({
       <div
         className="map-canvas real-map"
         style={{
-          height: '540px',
-          borderRadius: '14px',
+          position: 'relative',
+          height: '520px',
+          borderRadius: '16px',
           overflow: 'hidden',
-          border: '1px solid #cbd5e1'
+          border: '1px solid #cbd5e1',
         }}
       >
         <MapContainer
           center={defaultCenter}
-          zoom={12}
+          zoom={mapZoom}
           scrollWheelZoom
           className="leaflet-map"
+          style={{ height: '100%', width: '100%' }}
         >
           <MapSizeFix />
+          <MapViewController center={targetCenter} zoom={mapZoom} />
 
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
+          {/* 14. 地図右上コントロール */}
           <MapControls
             onNotice={onNotice}
             centerPos={defaultCenter}
@@ -507,18 +548,21 @@ export default function DisasterMap({
 
           <ClickCapture onPick={handlePickPoint} />
 
-          {confirmingPoint && (
-            <Marker
-              position={[
-                confirmingPoint.lat,
-                confirmingPoint.lng
-              ]}
-              icon={icon(newPinType)}
-            >
-              <Popup>この位置にピンを設置（選択中）</Popup>
+          {/* 13. 現在地アイコン */}
+          {userLocation && (
+            <Marker position={userLocation} icon={currentLocationIcon}>
+              <Popup>現在地</Popup>
             </Marker>
           )}
 
+          {/* 新規ピン仮設置 */}
+          {confirmingPoint && (
+            <Marker position={[confirmingPoint.lat, confirmingPoint.lng]} icon={icon(newPinType)}>
+              <Popup>新規ピン作成中</Popup>
+            </Marker>
+          )}
+
+          {/* 既存ピン */}
           {visiblePins.map((pin) => (
             <Marker
               key={pin.id}
@@ -530,33 +574,12 @@ export default function DisasterMap({
             >
               <Popup>
                 <div style={{ padding: '2px' }}>
-                  <span
-                    style={{
-                      color: pinColors[pin.type],
-                      fontWeight: 'bold',
-                      fontSize: '12px'
-                    }}
-                  >
+                  <span style={{ color: pinColors[pin.type], fontWeight: 'bold', fontSize: '12px' }}>
                     ● {pin.type}
                   </span>
-
-                  <h4
-                    style={{
-                      margin: '4px 0 2px',
-                      fontSize: '14px'
-                    }}
-                  >
-                    {pin.title}
-                  </h4>
-
+                  <h4 style={{ margin: '4px 0 2px', fontSize: '14px' }}>{pin.title}</h4>
                   {isWithin12Hours(pin.created_at) && (
-                    <span
-                      style={{
-                        color: '#16a34a',
-                        fontSize: '11px',
-                        fontWeight: 'bold'
-                      }}
-                    >
+                    <span style={{ color: '#16a34a', fontSize: '11px', fontWeight: 'bold' }}>
                       🟢 12時間以内
                     </span>
                   )}
@@ -566,307 +589,181 @@ export default function DisasterMap({
           ))}
         </MapContainer>
 
-        {/* 6-1 ピン設置モーダル/ダイアログ */}
-        {confirmingPoint && (
+        {/* 10-1: 地図の左下に固定表示する「操作方法」ボタン */}
+        <button
+          type="button"
+          onClick={() => {
+            setCurrentSlideIndex(0)
+            setShowHowToModal(true)
+          }}
+          style={{
+            position: 'absolute',
+            bottom: '16px',
+            left: '16px',
+            zIndex: 500,
+            background: '#ffffff',
+            color: '#0284c7',
+            border: '2px solid #0284c7',
+            borderRadius: '24px',
+            padding: '10px 18px',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <HelpCircle size={18} />
+          操作方法
+        </button>
+      </div>
+
+      {/* 16. ピン投稿画面 (縦方向のスクロール形式 1列レイアウト) */}
+      {confirmingPoint && (
+        <div
+          role="dialog"
+          aria-label="ピンを投稿"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.75)',
+            zIndex: 8000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
           <div
-            className="pin-confirm"
-            role="dialog"
-            aria-label="ピンを投稿"
             style={{
-              position: 'absolute',
-              top: '20px',
-              left: '50%',
-              transform: 'translateX(-50%)',
               background: '#ffffff',
-              padding: '24px 28px',
               borderRadius: '16px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
-              zIndex: 700,
-              width: 'calc(100% - 24px)',
-              maxWidth: '620px',
-              boxSizing: 'border-box',
+              padding: '24px',
+              maxWidth: '520px',
+              width: '100%',
               maxHeight: '85vh',
               overflowY: 'auto',
-              border: '2px solid #0284c7',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '16px',
-                borderBottom: '1px solid #e2e8f0',
-                paddingBottom: '10px'
-              }}
-            >
-              <strong
-                style={{
-                  fontSize: '18px',
-                  color: '#0f172a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
-              >
-                <MapPin
-                  size={22}
-                  style={{ color: '#0284c7' }}
-                />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+              <strong style={{ fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <MapPin size={22} color="#0284c7" />
                 ピンを投稿
               </strong>
-
               <button
+                type="button"
                 onClick={() => setConfirmingPoint(null)}
-                style={{
-                  border: 'none',
-                  background: '#f1f5f9',
-                  borderRadius: '50%',
-                  width: '32px',
-                  height: '32px',
-                  display: 'grid',
-                  placeItems: 'center',
-                  cursor: 'pointer'
-                }}
+                style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', width: '32px', height: '32px', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
               >
                 <X size={18} color="#64748b" />
               </button>
             </div>
 
-            {/* ★ 入力欄を必ず1列で表示 */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr',
-                width: '100%',
-                gap: '14px',
-                marginBottom: '20px'
-              }}
-            >
-              {/* ピンの種類 */}
-              <div style={{ width: '100%' }}>
-                <label
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 'bold',
-                    display: 'block',
-                    marginBottom: '6px',
-                    color: '#334155'
-                  }}
-                >
+            {/* 16-1: 縦1列スクロールレイアウト */}
+            <form onSubmit={(e) => { e.preventDefault(); handleCreatePinSubmit(); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px', color: '#334155' }}>
                   ピンの種類（カテゴリ）
                 </label>
-
                 <select
                   value={newPinType}
-                  onChange={(e) =>
-                    setNewPinType(
-                      e.target.value as MapPinItem['type']
-                    )
-                  }
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px'
-                  }}
+                  onChange={(e) => setNewPinType(e.target.value as MapPinItem['type'])}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 >
-                  <option value="通行注意">
-                    通行注意 (危険)
-                  </option>
-                  <option value="井戸">
-                    井戸 (生活用水)
-                  </option>
-                  <option value="自販機">
-                    自販機 (災害給水)
-                  </option>
-                  <option value="避難所">
-                    避難所
-                  </option>
-                  <option value="指定物資置き場">
-                    指定物資置き場
-                  </option>
-                  <option value="求援">
-                    求援
-                  </option>
-                  <option value="道路通行不能">
-                    道路通行不能
-                  </option>
-                  <option value="土砂崩れ">
-                    土砂崩れ
-                  </option>
-                  <option value="浸水">
-                    浸水
-                  </option>
+                  <option value="通行注意">通行注意 (危険)</option>
+                  <option value="井戸">井戸 (生活用水)</option>
+                  <option value="自販機">自販機 (災害給水)</option>
+                  <option value="避難所">避難所</option>
+                  <option value="指定物資置き場">指定物資置き場</option>
+                  <option value="求援">求援</option>
+                  <option value="道路通行不能">道路通行不能</option>
+                  <option value="土砂崩れ">土砂崩れ</option>
+                  <option value="浸水">浸水</option>
                 </select>
               </div>
 
-              {/* 名前 / タイトル */}
-              <div style={{ width: '100%' }}>
-                <label
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 'bold',
-                    color: '#334155',
-                    display: 'block',
-                    marginBottom: '6px'
-                  }}
-                >
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '6px' }}>
                   名前 / タイトル（任意）
                 </label>
-
                 <input
                   type="text"
                   placeholder="例：加茂川近くの井戸 / ○○自販機"
                   value={newPinTitle}
-                  onChange={(e) =>
-                    setNewPinTitle(e.target.value)
-                  }
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px'
-                  }}
+                  onChange={(e) => setNewPinTitle(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 />
               </div>
 
-              {/* 内容 / 詳細 */}
-              <div style={{ width: '100%' }}>
-                <label
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 'bold',
-                    color: '#334155',
-                    display: 'block',
-                    marginBottom: '6px'
-                  }}
-                >
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '6px' }}>
                   内容 / 詳細（任意）
                 </label>
-
                 <textarea
-                  placeholder="詳細な状況や利用時の注意事項などを入力してください"
+                  placeholder="詳細な状況や注意事項を入力してください"
                   value={newPinContent}
-                  onChange={(e) =>
-                    setNewPinContent(e.target.value)
-                  }
+                  onChange={(e) => setNewPinContent(e.target.value)}
                   rows={3}
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '14px',
-                    resize: 'vertical'
-                  }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                 />
               </div>
-            </div>
 
-            {/* ボタン */}
-            <div
-              style={{
-                display: 'flex',
-                gap: '10px',
-                justifyContent: 'flex-end',
-                paddingTop: '10px',
-                borderTop: '1px solid #f1f5f9'
-              }}
-            >
-              <button
-                type="button"
-                className="secondary-button"
-                style={{
-                  padding: '10px 18px',
-                  fontSize: '14px'
-                }}
-                onClick={() => setConfirmingPoint(null)}
-              >
-                キャンセル
-              </button>
+              {/* 16-3: 写真アップロード (最大2MB) */}
+              <div>
+                <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                  写真アップロード (最大2MB, 1枚)
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    padding: '12px',
+                    border: '2px dashed #cbd5e1',
+                    borderRadius: '8px',
+                    background: '#f8fafc',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: '#0284c7',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  <Camera size={18} />
+                  {newPinPhoto ? '写真を変更する' : '写真を選択 / 撮影'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handlePhotoSelect(e, false)}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+                {newPinPhoto && (
+                  <div style={{ marginTop: '8px', textAlign: 'center' }}>
+                    <img src={newPinPhoto} alt="プレビュー" style={{ maxHeight: '120px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                  </div>
+                )}
+              </div>
 
-              <button
-                type="button"
-                className="primary-button"
-                style={{
-                  padding: '10px 22px',
-                  fontSize: '14px',
-                  fontWeight: 'bold'
-                }}
-                onClick={handleCreatePinSubmit}
-              >
-                登録する
-              </button>
-            </div>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                <button type="button" className="secondary-button" style={{ padding: '10px 18px' }} onClick={() => setConfirmingPoint(null)}>
+                  キャンセル
+                </button>
+                <button type="submit" className="primary-button" style={{ padding: '10px 22px', fontWeight: 'bold' }}>
+                  登録する
+                </button>
+              </div>
+            </form>
           </div>
-        )}
-
-        {/* 地図凡例 */}
-        <div
-          className="map-legend"
-          style={{
-            display: 'flex',
-            gap: '10px',
-            flexWrap: 'wrap',
-            fontSize: '12px'
-          }}
-        >
-          <b>凡例:</b>
-
-          <span>
-            <i
-              className="legend-dot"
-              style={{ background: pinColors['避難所'] }}
-            />
-            避難所
-          </span>
-
-          <span>
-            <i
-              className="legend-dot"
-              style={{ background: pinColors['井戸'] }}
-            />
-            井戸
-          </span>
-
-          <span>
-            <i
-              className="legend-dot"
-              style={{ background: pinColors['自販機'] }}
-            />
-            自販機
-          </span>
-
-          <span>
-            <i
-              className="legend-dot"
-              style={{
-                background: pinColors['指定物資置き場']
-              }}
-            />
-            物資置き場
-          </span>
-
-          <span>
-            <i
-              className="legend-dot"
-              style={{ background: pinColors['通行注意'] }}
-            />
-            危険・障害
-          </span>
         </div>
-      </div>
+      )}
 
-      {/* ピン詳細ダイアログ / カード */}
+      {/* ピン詳細表示カード */}
       {selected && (
         <div
-          className="pin-detail"
           style={{
             position: 'absolute',
             bottom: '16px',
@@ -879,135 +776,41 @@ export default function DisasterMap({
             background: '#ffffff',
             padding: '18px',
             borderRadius: '16px',
-            boxShadow: '0 12px 36px rgba(0,0,0,0.22)',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.25)',
             border: '1px solid #cbd5e1',
             zIndex: 600,
           }}
         >
-          <button
-            className="modal-close"
-            onClick={() => setSelected(null)}
-            aria-label="閉じる"
-          >
+          <button className="modal-close" onClick={() => setSelected(null)} aria-label="閉じる">
             <X size={18} />
           </button>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '6px'
-            }}
-          >
-            <span
-              className="pin-type"
-              style={{
-                color: pinColors[selected.type] || '#2563eb',
-                fontWeight: 700,
-                fontSize: '13px'
-              }}
-            >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ color: pinColors[selected.type] || '#2563eb', fontWeight: 700, fontSize: '13px' }}>
               ● {selected.type}
             </span>
-
-            {/* 8. リアルタイム情報表示: 12時間以内 */}
             {isWithin12Hours(selected.created_at) && (
-              <span
-                style={{
-                  background: '#dcfce7',
-                  color: '#15803d',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  padding: '3px 8px',
-                  borderRadius: '12px'
-                }}
-              >
+              <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 'bold', padding: '3px 8px', borderRadius: '12px' }}>
                 🟢 12時間以内
               </span>
             )}
           </div>
 
-          <h3
-            style={{
-              margin: '4px 0 8px',
-              fontSize: '18px',
-              color: '#0f172a'
-            }}
-          >
-            {selected.title}
-          </h3>
+          <h3 style={{ margin: '4px 0 8px', fontSize: '18px', color: '#0f172a' }}>{selected.title}</h3>
 
           {selected.content && (
-            <p
-              style={{
-                margin: '0 0 12px',
-                fontSize: '14px',
-                color: '#334155',
-                lineHeight: 1.5,
-                background: '#f8fafc',
-                padding: '10px',
-                borderRadius: '8px'
-              }}
-            >
+            <p style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', lineHeight: 1.5, background: '#f8fafc', padding: '10px', borderRadius: '8px' }}>
               {selected.content}
             </p>
           )}
 
-          <div
-            style={{
-              fontSize: '12px',
-              color: '#64748b',
-              marginBottom: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <span>
-              投稿者：<b>{selected.author}</b>
-            </span>
-
-            {/* 3-1-4 認証マークのみ表示 */}
-            {selected.author_is_verified && (
-              <img
-                src="/ninsyou.png"
-                alt="認証済み"
-                style={{
-                  height: '16px',
-                  width: 'auto'
-                }}
-                title="本人確認済みユーザー"
-              />
-            )}
-          </div>
-
-          {/* 9. 「正しい〇」「異なる✕」ボタンおよび件数表示 */}
-          <div
-            style={{
-              background: '#f1f5f9',
-              padding: '12px',
-              borderRadius: '10px',
-              marginBottom: '14px'
-            }}
-          >
-            <div
-              style={{
-                fontSize: '12px',
-                fontWeight: 'bold',
-                color: '#475569',
-                marginBottom: '8px'
-              }}
-            >
-              現地の情報確認（※投稿地点から2km以内のユーザーのみ投票可能）
+          {/* 17, 18. 「事実〇」「誤り×」投票機能 */}
+          <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '10px', marginBottom: '14px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '8px' }}>
+              現地の情報確認（※半径2km以内のユーザーのみ投票可能）
             </div>
 
-            <div
-              style={{
-                display: 'flex',
-                gap: '10px'
-              }}
-            >
+            <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 type="button"
                 style={{
@@ -1028,7 +831,7 @@ export default function DisasterMap({
                 onClick={() => setVotingType('correct')}
               >
                 <CheckCircle2 size={16} />
-                正しい 〇 ({selected.correct_count || 0})
+                事実〇 ({selected.correct_count || 0})
               </button>
 
               <button
@@ -1051,508 +854,186 @@ export default function DisasterMap({
                 onClick={() => setVotingType('different')}
               >
                 <XCircle size={16} />
-                異なる ✕ ({selected.different_count || 0})
+                誤り× ({selected.different_count || 0})
               </button>
             </div>
           </div>
 
-          {/* 9-2 投票時追加入力ダイアログ / フォーム */}
+          {/* 投票ダイアログ */}
           {votingType && (
-            <div
-              style={{
-                background: '#fff',
-                border: '2px solid #3b82f6',
-                padding: '14px',
-                borderRadius: '10px',
-                marginBottom: '14px'
-              }}
-            >
-              <strong
-                style={{
-                  fontSize: '13px',
-                  color: '#1e3a8a',
-                  display: 'block',
-                  marginBottom: '8px'
-                }}
-              >
-                「
-                {votingType === 'correct'
-                  ? '正しい〇'
-                  : '異なる✕'}
-                」の補足情報を追加
+            <div style={{ background: '#fff', border: '2px solid #3b82f6', padding: '14px', borderRadius: '10px', marginBottom: '14px' }}>
+              <strong style={{ fontSize: '13px', color: '#1e3a8a', display: 'block', marginBottom: '8px' }}>
+                「{votingType === 'correct' ? '事実〇' : '誤り×'}」の補足情報を追加
               </strong>
-
               <textarea
-                placeholder="補足コメント（例：〇〇時に確認。水量は十分ありました）"
+                placeholder="補足コメントを入力してください"
                 value={voteComment}
                 onChange={(e) => setVoteComment(e.target.value)}
                 rows={2}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  fontSize: '12px',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '6px',
-                  marginBottom: '8px'
-                }}
+                style={{ width: '100%', padding: '8px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '6px', marginBottom: '8px' }}
               />
-
-              <div style={{ marginBottom: '10px' }}>
-                <label
-                  style={{
-                    fontSize: '12px',
-                    color: '#475569',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Camera size={16} />
-                  写真・ファイルを添えて送信
-
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handlePhotoSelect}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-
-                {votePhoto && (
-                  <img
-                    src={votePhoto}
-                    alt="添付プレビュー"
-                    style={{
-                      height: '50px',
-                      marginTop: '4px',
-                      borderRadius: '4px'
-                    }}
-                  />
-                )}
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '6px',
-                  justifyContent: 'flex-end'
-                }}
-              >
-                <button
-                  className="secondary-button"
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '12px'
-                  }}
-                  onClick={() => setVotingType(null)}
-                >
+              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                <button className="secondary-button" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => setVotingType(null)}>
                   キャンセル
                 </button>
-
-                <button
-                  className="primary-button"
-                  style={{
-                    padding: '4px 12px',
-                    fontSize: '12px'
-                  }}
-                  onClick={handleVoteSubmit}
-                >
-                  評価・補足を送信
+                <button className="primary-button" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={handleVoteSubmit}>
+                  送信する
                 </button>
               </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* 過去の確認・補足情報の蓄積表示（最新が上） */}
-          {selected.vote_details &&
-            selected.vote_details.length > 0 && (
-              <div style={{ marginBottom: '14px' }}>
-                <h4
-                  style={{
-                    fontSize: '12px',
-                    color: '#475569',
-                    margin: '0 0 6px'
-                  }}
-                >
-                  確認・補足情報の履歴（最新順）
-                </h4>
-
-                <div
-                  style={{
-                    maxHeight: '120px',
-                    overflowY: 'auto',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                    padding: '8px'
-                  }}
-                >
-                  {selected.vote_details.map((v) => (
-                    <div
-                      key={v.id}
-                      style={{
-                        fontSize: '12px',
-                        borderBottom: '1px solid #f1f5f9',
-                        paddingBottom: '6px',
-                        marginBottom: '6px'
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          color: '#64748b'
-                        }}
-                      >
-                        <span>
-                          <b>{v.user_name}</b>{' '}
-                          (
-                          {v.vote_type === 'correct'
-                            ? '〇正しい'
-                            : '✕異なる'}
-                          )
-                        </span>
-
-                        <small>
-                          {new Date(
-                            v.created_at
-                          ).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </small>
-                      </div>
-
-                      {v.comment && (
-                        <div
-                          style={{
-                            color: '#1e293b',
-                            marginTop: '2px'
-                          }}
-                        >
-                          {v.comment}
-                        </div>
-                      )}
-
-                      {v.file_url && (
-                        <img
-                          src={v.file_url}
-                          alt="写真"
-                          style={{
-                            maxHeight: '60px',
-                            marginTop: '4px',
-                            borderRadius: '4px'
-                          }}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          {/* 12-2 避難所への情報投稿機能 (避難所ピンのみ) */}
-          {selected.type === '避難所' && (
-            <div
-              style={{
-                background: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                padding: '12px',
-                borderRadius: '10px',
-                marginBottom: '14px'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
-              >
-                <strong
-                  style={{
-                    fontSize: '13px',
-                    color: '#166534',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <Users size={16} />
-                  避難所の現地情報
-                </strong>
-
-                <button
-                  className="text-button"
-                  style={{
-                    fontSize: '12px',
-                    color: '#15803d',
-                    fontWeight: 'bold'
-                  }}
-                  onClick={() =>
-                    setShowShelterForm(!showShelterForm)
-                  }
-                >
-                  {showShelterForm
-                    ? '閉じる'
-                    : '+ 現状を投稿する(2km以内)'}
-                </button>
-              </div>
-
-              {showShelterForm && (
-                <div
-                  style={{
-                    marginTop: '10px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                  }}
-                >
-                  <input
-                    type="text"
-                    placeholder="避難所人数 (例: 約80名)"
-                    value={shelterPeople}
-                    onChange={(e) =>
-                      setShelterPeople(e.target.value)
-                    }
-                    style={{
-                      padding: '6px',
-                      fontSize: '12px',
-                      borderRadius: '4px',
-                      border: '1px solid #cbd5e1'
-                    }}
-                  />
-
-                  <input
-                    type="text"
-                    placeholder="男女比・年齢層 (例: 男4:女6, 高齢者多数)"
-                    value={shelterGender}
-                    onChange={(e) =>
-                      setShelterGender(e.target.value)
-                    }
-                    style={{
-                      padding: '6px',
-                      fontSize: '12px',
-                      borderRadius: '4px',
-                      border: '1px solid #cbd5e1'
-                    }}
-                  />
-
-                  <textarea
-                    placeholder="設備の詳細 (例: 水道使用可、暖房完備、おむつ不足)"
-                    value={shelterFacility}
-                    onChange={(e) =>
-                      setShelterFacility(e.target.value)
-                    }
-                    rows={2}
-                    style={{
-                      padding: '6px',
-                      fontSize: '12px',
-                      borderRadius: '4px',
-                      border: '1px solid #cbd5e1'
-                    }}
-                  />
-
-                  <button
-                    className="primary-button"
-                    style={{
-                      fontSize: '12px',
-                      padding: '6px'
-                    }}
-                    onClick={handleShelterReportSubmit}
-                  >
-                    避難所情報を更新・保存
-                  </button>
-                </div>
-              )}
-
-              {/* 過去の避難所情報蓄積（最新順表示） */}
-              {selected.shelter_reports &&
-                selected.shelter_reports.length > 0 && (
-                  <div style={{ marginTop: '10px' }}>
-                    <small
-                      style={{
-                        color: '#15803d',
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      報告履歴 (最新順):
-                    </small>
-
-                    <div
-                      style={{
-                        maxHeight: '120px',
-                        overflowY: 'auto',
-                        background: '#fff',
-                        borderRadius: '6px',
-                        padding: '6px',
-                        marginTop: '4px',
-                        border: '1px solid #dcfce7'
-                      }}
-                    >
-                      {selected.shelter_reports.map((sr) => (
-                        <div
-                          key={sr.id}
-                          style={{
-                            fontSize: '12px',
-                            borderBottom: '1px dashed #e2e8f0',
-                            paddingBottom: '4px',
-                            marginBottom: '4px'
-                          }}
-                        >
-                          <div
-                            style={{
-                              color: '#475569',
-                              fontSize: '11px'
-                            }}
-                          >
-                            <b>{sr.user_name}</b>{' '}
-                            (
-                            {new Date(
-                              sr.created_at
-                            ).toLocaleString()}
-                            )
-                          </div>
-
-                          {sr.people_count && (
-                            <div>
-                              人数: {sr.people_count}
-                            </div>
-                          )}
-
-                          {sr.gender_ratio && (
-                            <div>
-                              男女比: {sr.gender_ratio}
-                            </div>
-                          )}
-
-                          {sr.facility_details && (
-                            <div>
-                              設備: {sr.facility_details}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-            </div>
-          )}
-
-          {/* 10. 同じ場所への複数投稿蓄積表示 */}
-          {selected.sub_posts &&
-            selected.sub_posts.length > 0 && (
-              <div style={{ marginBottom: '14px' }}>
-                <strong
-                  style={{
-                    fontSize: '12px',
-                    color: '#334155'
-                  }}
-                >
-                  この場所に関する追加情報履歴（最新順）
-                </strong>
-
-                <div
-                  style={{
-                    maxHeight: '100px',
-                    overflowY: 'auto',
-                    border: '1px solid #e2e8f0',
-                    padding: '6px',
-                    borderRadius: '6px',
-                    marginTop: '4px'
-                  }}
-                >
-                  {selected.sub_posts.map((sp) => (
-                    <div
-                      key={sp.id}
-                      style={{
-                        fontSize: '12px',
-                        paddingBottom: '4px',
-                        borderBottom: '1px solid #f1f5f9'
-                      }}
-                    >
-                      <span
-                        style={{ color: '#64748b' }}
-                      >
-                        {sp.user_name}:{' '}
-                      </span>
-                      <span>{sp.content}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          {/* ピン操作ボタン */}
+      {/* 11. 操作方法説明画面モーダル (外側クリックでは閉じない) */}
+      {showHowToModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.85)',
+            zIndex: 9000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
           <div
-            className="pin-actions"
             style={{
+              background: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
               display: 'flex',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
               alignItems: 'center',
-              borderTop: '1px solid #f1f5f9',
-              paddingTop: '10px'
+              textAlign: 'center',
             }}
           >
-            <button
-              type="button"
-              className="text-button"
-              style={{
-                color: '#e11d48',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-              onClick={() => setReportTarget(selected)}
-            >
-              <Flag size={14} />
-              このピンを通報
-            </button>
+            {/* 11-1: ページ数表示 (例: 1 / 5) */}
+            <div style={{ fontSize: '16px', fontWeight: '800', color: '#0284c7', marginBottom: '12px' }}>
+              {SLIDES[currentSlideIndex].title}
+            </div>
 
-            {role === '管理者' && (
+            {/* 11-3: 画像表示 (map1.png ~ map5.png) */}
+            <div style={{ width: '100%', height: '220px', background: '#f1f5f9', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', overflow: 'hidden' }}>
+              <img
+                src={SLIDES[currentSlideIndex].image}
+                alt={`操作方法 ${currentSlideIndex + 1}`}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              />
+            </div>
+
+            {/* 11-4: スライド本文テキスト */}
+            <p style={{ fontSize: '14px', color: '#1e293b', lineHeight: 1.6, minHeight: '60px', whiteSpace: 'pre-line', marginBottom: '20px' }}>
+              {SLIDES[currentSlideIndex].text}
+            </p>
+
+            {/* 11-2: ナビゲーションボタン */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', gap: '12px' }}>
+              {/* 1ページ目の時は戻るボタン無効 */}
               <button
                 type="button"
-                className="danger-button"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      'このピンを削除しますか？'
-                    )
-                  ) {
-                    deleteMapPin(String(selected.id))
-                    setSelected(null)
-                    refreshPins()
-                    onNotice(
-                      '管理者権限でピンを削除しました'
-                    )
-                  }
+                className="secondary-button"
+                disabled={currentSlideIndex === 0}
+                onClick={() => setCurrentSlideIndex(prev => prev - 1)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  fontSize: '14px',
+                  opacity: currentSlideIndex === 0 ? 0.3 : 1,
+                  cursor: currentSlideIndex === 0 ? 'not-allowed' : 'pointer',
+                  justifyContent: 'center',
                 }}
               >
-                <Trash2 size={14} />
-                ピンを削除
+                <ChevronLeft size={16} /> 戻る
               </button>
-            )}
+
+              {/* 最後のページの時は「閉じる」ボタン */}
+              {currentSlideIndex === SLIDES.length - 1 ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleCloseHowTo}
+                  style={{ flex: 1, padding: '10px', fontSize: '14px', fontWeight: 'bold', justifyContent: 'center' }}
+                >
+                  閉じる
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setCurrentSlideIndex(prev => prev + 1)}
+                  style={{ flex: 1, padding: '10px', fontSize: '14px', justifyContent: 'center' }}
+                >
+                  次へ <ChevronRight size={16} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* 通報モーダル */}
-      {reportTarget && (
-        <ReportModal
-          isOpen={true}
-          onClose={() => setReportTarget(null)}
-          targetType="map_pin"
-          targetId={String(reportTarget.id)}
-          targetTitle={reportTarget.title}
-          targetAuthorName={reportTarget.author}
-          onReportSuccess={() => {
-            onNotice('ピンの通報を受け付けました')
-            refreshPins()
+      {/* 12. 操作方法終了後の位置情報案内ダイアログ */}
+      {showGpsNotice && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.7)',
+            zIndex: 9100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
           }}
-        />
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '380px',
+              width: '100%',
+              padding: '20px',
+              textAlign: 'center',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+            }}
+          >
+            <Navigation size={32} color="#0284c7" style={{ marginBottom: '12px' }} />
+            <h3 style={{ fontSize: '16px', margin: '0 0 8px', color: '#0f172a' }}>位置情報の共有</h3>
+            <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5, marginBottom: '20px' }}>
+              位置情報を許可すると、現在地付近の道路や被害ピンの投稿・確認ができます。
+            </p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                onClick={() => setShowGpsNotice(false)}
+              >
+                許可しない
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                style={{ flex: 1, padding: '10px', fontSize: '13px', fontWeight: 'bold' }}
+                onClick={() => {
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(() => {
+                      onNotice('位置情報の共有を許可しました')
+                    })
+                  }
+                  setShowGpsNotice(false)
+                }}
+              >
+                許可する
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

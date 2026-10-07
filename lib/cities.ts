@@ -128,6 +128,19 @@ export function findCity(pref: string, city: string): CityInfo | undefined {
   return CITIES_DATA.find(c => c.prefecture === pref && c.city === city)
 }
 
+export function findNearestCity(lat: number, lng: number): CityInfo {
+  let best = CITIES_DATA[0]
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const item of CITIES_DATA) {
+    const distance = calculateDistanceKm(lat, lng, item.lat, item.lng)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = item
+    }
+  }
+  return best
+}
+
 /**
  * 2地点の経度・緯度から距離(km)を計算する（Haversine formula）
  */
